@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#452617">
+  <meta name="description" content="Dama Pinoy — a traditional Filipino two-player checkers game that runs offline in your browser.">
+  <title>Dama Pinoy — Traditional Filipino Checkers</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+
+    <section id="screen-title" class="screen screen--title" aria-labelledby="title-heading">
+      <div class="title-card">
+        <div class="emblem" aria-hidden="true">
+          <span class="emblem__square emblem__square--dark"></span>
+          <span class="emblem__square emblem__square--light"></span>
+          <span class="emblem__square emblem__square--light"></span>
+          <span class="emblem__square emblem__square--dark"></span>
+        </div>
+        <p class="eyebrow">Larong Pinoy</p>
+        <h1 id="title-heading" tabindex="-1">Dama Pinoy</h1>
+        <p class="subtitle">Traditional Filipino Checkers</p>
+        <p class="lede">Two players, one board. Mandatory captures, longest-chain jumps, and Dama promotions — played the way it is at home.</p>
+        <div class="button-row">
+          <button type="button" id="btn-start" class="btn btn--primary">Start Game</button>
+          <button type="button" id="btn-howto" class="btn btn--ghost">How to Play</button>
+        </div>
+        <ul class="title-facts">
+          <li>Local 2-player</li>
+          <li>Works offline</li>
+          <li>No install</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="screen-howto" class="screen screen--howto" aria-labelledby="howto-heading" hidden>
+      <div class="panel-card">
+        <p class="eyebrow">Quick reference</p>
+        <h2 id="howto-heading" tabindex="-1">How to Play</h2>
+        <ol class="rules">
+          <li><strong>Red moves first.</strong> Players take turns on the same device.</li>
+          <li><strong>Pieces move diagonally forward.</strong> A normal piece steps one dark square forward.</li>
+          <li><strong>Captures are mandatory.</strong> Jump over an adjacent enemy piece to the empty square beyond — forward or backward.</li>
+          <li><strong>Choose the biggest capture.</strong> You must follow the capture path that removes the most pieces.</li>
+          <li><strong>Reach the opposite end to become a Dama.</strong> Promotion happens immediately and ends that turn.</li>
+          <li><strong>A Dama moves and captures in all diagonal directions</strong>, sliding any distance over empty squares.</li>
+          <li><strong>Capture all opponent pieces or block all their moves to win.</strong> If both sides make 100 moves with no capture or promotion, the game is a draw.</li>
+        </ol>
+        <div class="button-row button-row--start">
+          <button type="button" id="btn-howto-back" class="btn btn--ghost">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-game" class="screen screen--game" aria-labelledby="game-heading" hidden>
+      <h2 id="game-heading" class="visually-hidden" tabindex="-1">Dama Pinoy game board</h2>
+      <div class="game-layout">
+        <div class="board-area">
+          <div class="board-shell">
+            <div class="coords coords--files" aria-hidden="true">
+              <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+            </div>
+            <div class="coords coords--ranks" aria-hidden="true">
+              <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div id="board" class="board" role="group" aria-label="Dama board. Blue starts at the top, Red starts at the bottom."></div>
+          </div>
+        </div>
+
+        <aside class="side-panel" aria-label="Game status and controls">
+          <p class="turn-pill" id="turn-indicator">
+            <span class="turn-dot" id="turn-dot" aria-hidden="true"></span>
+            <span id="turn-text">Turn: Red</span>
+          </p>
+          <p id="status-text" class="status" role="status" aria-live="polite">Red moves first.</p>
+
+          <div class="players">
+            <article class="player-card player-card--red is-active" id="player-red">
+              <h3 class="player-name"><span class="chip" aria-hidden="true"></span>Red</h3>
+              <dl class="player-stats">
+                <div class="stat">
+                  <dt>Pieces left</dt>
+                  <dd id="red-remaining">12</dd>
+                </div>
+                <div class="stat">
+                  <dt>Captured</dt>
+                  <dd id="red-captured">0</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="player-card player-card--blue" id="player-blue">
+              <h3 class="player-name"><span class="chip" aria-hidden="true"></span>Blue</h3>
+              <dl class="player-stats">
+                <div class="stat">
+                  <dt>Pieces left</dt>
+                  <dd id="blue-remaining">12</dd>
+                </div>
+                <div class="stat">
+                  <dt>Captured</dt>
+                  <dd id="blue-captured">0</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="side-actions">
+            <button type="button" id="btn-restart" class="btn btn--ghost">Restart</button>
+            <button type="button" id="btn-menu" class="btn btn--ghost">Main Menu</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="screen-end" class="screen screen--end" aria-labelledby="end-title" hidden>
+      <div class="end-card" id="end-card">
+        <p class="eyebrow">Game over</p>
+        <h2 id="end-title" tabindex="-1">Red Wins!</h2>
+        <p id="end-detail" class="end-detail"></p>
+        <div class="button-row">
+          <button type="button" id="btn-again" class="btn btn--primary">Play Again</button>
+          <button type="button" id="btn-end-menu" class="btn btn--ghost">Main Menu</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <noscript>
+    <p class="noscript">Dama Pinoy needs JavaScript enabled to run.</p>
+  </noscript>
+  <script src="script.js" defer></script>
+</body>
+</html>
