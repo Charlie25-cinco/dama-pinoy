@@ -438,6 +438,35 @@ body {
   border-radius: 8px; background: var(--surface-glass); font-weight: 700; color: var(--heading); }
 .online-side { align-self: start; }
 .online-side > .btn { width: 100%; }
+.account-panel {
+  width: min(100%, 620px);
+  margin: var(--space-4) auto;
+  padding: clamp(20px, 4vw, 36px);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card-image);
+  box-shadow: var(--shadow-card);
+  overflow-wrap: anywhere;
+}
+.account-panel h2 { font-family: var(--font-display); color: var(--heading); }
+.account-fields { display: grid; gap: var(--space-3); min-width: 0; }
+.account-fields input:not([type="checkbox"]) { width: 100%; min-height: 48px; }
+.account-tabs { display: flex; gap: var(--space-2); margin: var(--space-3) 0; }
+.account-tabs button { flex: 1; min-height: 44px; border: 2px solid var(--border);
+  border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
+.account-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; background: var(--surface-glass); }
+.account-tabs button:focus-visible { outline: 3px solid var(--focus-light); outline-offset: 2px; }
+.account-check { display: flex; gap: var(--space-2); align-items: start; }
+.account-check input { min-width: 20px; min-height: 20px; }
+.account-panel > .btn, #account-auth > .btn { width: 100%; margin-top: var(--space-3); }
+.account-stats-values { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+.account-stats-values dd { margin: 0; font-weight: 700; color: var(--heading); }
+#account-delete-dialog { width: min(92vw, 560px); padding: var(--space-4); border: 2px solid var(--border);
+  border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+#account-delete-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+#account-profile[hidden], #account-auth[hidden], #account-signup-name[hidden],
+#account-stats[hidden], #account-password[hidden], #account-password-label[hidden],
+#btn-menu-logout[hidden] { display: none; }
 .online-replays {
   width: min(100%, 980px);
   margin: var(--space-4) auto;
@@ -2232,6 +2261,8 @@ body {
 }
 
 @media (min-width: 600px) and (max-height: 820px) {
+  .title-card .button-row { gap: var(--space-2); }
+  .title-card .button-row .btn { min-height: 44px; padding: 0 var(--space-3); font-size: 0.85rem; }
   .title-card {
     padding: 22px 34px;
   }

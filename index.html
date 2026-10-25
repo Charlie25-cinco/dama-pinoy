@@ -119,21 +119,81 @@
           <button type="button" id="btn-howto" class="btn btn--ghost">How to Play</button>
           <button type="button" id="btn-stats" class="btn btn--ghost">Statistics</button>
           <button type="button" id="btn-online" class="btn btn--ghost">Online Multiplayer</button>
+          <button type="button" id="btn-account" class="btn btn--ghost">Log In / Sign Up</button>
+          <button type="button" id="btn-menu-logout" class="btn btn--ghost" hidden>Log Out</button>
           <button type="button" id="btn-import-replay" class="btn btn--ghost">Import Replay</button>
           <button type="button" id="btn-last-replay" class="btn btn--ghost" aria-label="View the last saved game replay" hidden>Last Replay</button>
         </div>
         <ul class="title-facts">
-          <li>2-player &amp; vs AI</li>
+          <li id="account-menu-identity">Guest · 2-player &amp; vs AI</li>
           <li>Best of 3/5/9 &amp; replay</li>
           <li>Works offline</li>
         </ul>
       </div>
     </section>
 
+    <section id="screen-account" class="screen screen--account" aria-labelledby="account-heading" hidden>
+      <div class="account-panel">
+        <p class="eyebrow">Optional player identity</p>
+        <h2 id="account-heading" tabindex="-1">Player Account</h2>
+        <p id="account-status" role="status" aria-live="polite">Guest play is always available. Local data stays on this device.</p>
+        <div id="account-auth">
+          <div class="account-tabs" role="tablist" aria-label="Account access">
+            <button type="button" id="account-tab-login" role="tab" aria-selected="true" aria-controls="account-auth-panel">Log In</button>
+            <button type="button" id="account-tab-signup" role="tab" aria-selected="false" aria-controls="account-auth-panel" tabindex="-1">Sign Up</button>
+            <button type="button" id="account-tab-magic" role="tab" aria-selected="false" aria-controls="account-auth-panel" tabindex="-1">Magic Link</button>
+          </div>
+          <form id="account-form">
+            <div id="account-auth-panel" role="tabpanel" aria-labelledby="account-tab-login" class="account-fields">
+              <label for="account-email">Email</label>
+              <input id="account-email" class="name-input" type="email" autocomplete="email" maxlength="254" required>
+              <label id="account-password-label" for="account-password">Password</label>
+              <input id="account-password" class="name-input" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+              <div id="account-signup-name" class="account-fields" hidden>
+                <label for="account-new-name">Display name (1–20 characters)</label>
+                <input id="account-new-name" class="name-input" maxlength="20" autocomplete="nickname">
+                <label class="account-check"><input id="account-signup-passwordless" type="checkbox"> Upgrade using an email link instead of a password</label>
+              </div>
+              <p id="account-auth-hint" class="online-hint">Use your existing account. Leave any current room before switching identities.</p>
+              <button id="btn-account-submit" class="btn btn--primary" type="submit">Log In</button>
+            </div>
+          </form>
+          <button type="button" id="btn-account-reset" class="btn btn--ghost">Reset Password by Email</button>
+          <button type="button" id="btn-account-guest" class="btn btn--ghost">Continue as Guest</button>
+        </div>
+        <div id="account-profile" class="account-fields" hidden>
+          <p id="account-email-display"></p>
+          <form id="account-profile-form" class="account-fields">
+            <label for="account-display-name">Display name</label>
+            <input id="account-display-name" class="name-input" maxlength="20" autocomplete="nickname" required>
+            <button type="submit" class="btn btn--primary">Save Display Name</button>
+          </form>
+          <button type="button" id="btn-account-stats" class="btn btn--ghost">Account Statistics</button>
+          <button type="button" id="btn-account-replays" class="btn btn--ghost">Online Replays</button>
+          <button type="button" id="btn-account-logout" class="btn btn--ghost">Log Out</button>
+          <button type="button" id="btn-account-reauth" class="btn btn--ghost">Log In Again / Confirm Identity</button>
+          <button type="button" id="btn-account-delete" class="btn btn--danger">Delete Account</button>
+        </div>
+        <p class="online-hint">Account statistics contain server-validated online results only. Local/AI statistics and Last Replay are never merged, erased, or uploaded.</p>
+        <button type="button" id="btn-account-back" class="btn btn--ghost">Back to Menu</button>
+      </div>
+    </section>
+    <dialog id="account-delete-dialog" aria-labelledby="account-delete-heading">
+      <form method="dialog" class="account-fields">
+        <h2 id="account-delete-heading">Delete your account?</h2>
+        <p>This permanently deletes your profile and private account statistics and closes your rooms. Shared matches/replays remain for opponents with your identity replaced by “Deleted player”. Local data stays on this device. This cannot be undone.</p>
+        <label for="account-delete-confirm">Type DELETE to confirm</label>
+        <input id="account-delete-confirm" class="name-input" autocomplete="off">
+        <button type="button" id="btn-account-delete-confirm" class="btn btn--danger">Permanently Delete Account</button>
+        <button type="submit" class="btn btn--ghost">Cancel</button>
+      </form>
+    </dialog>
+
     <section id="screen-online" class="screen screen--online" aria-labelledby="online-heading" hidden>
       <div class="online-panel">
         <p class="eyebrow">Play across devices</p>
         <h2 id="online-heading" tabindex="-1">Online Multiplayer</h2>
+        <button type="button" id="btn-online-account" class="btn btn--ghost">Upgrade Guest / Log In</button>
         <p class="online-intro">Choose a color and match format, then share a room code. Red opens every game.</p>
         <p id="online-status" class="online-status" role="status" aria-live="polite">Enter a guest name to get started.</p>
 
@@ -282,7 +342,14 @@
       <div class="stats-card">
         <p class="eyebrow">Match record</p>
         <h2 id="stats-heading" tabindex="-1">Statistics</h2>
-        <p class="stats-intro">Your completed games and series on this device.</p>
+        <section id="account-stats" class="account-stats" aria-label="Account online statistics" hidden>
+          <h3 id="account-stats-name">Account Statistics</h3>
+          <p id="account-stats-status" role="status">Loading…</p>
+          <dl id="account-stats-values" class="account-stats-values"></dl>
+          <button type="button" id="btn-account-stats-refresh" class="btn btn--ghost">Refresh Account Statistics</button>
+          <p class="online-hint">Online results only. Local/AI statistics remain separate and reappear after logout. No guest data is silently merged.</p>
+        </section>
+        <p id="stats-source" class="stats-intro">Your completed games and series on this device.</p>
         <p id="stats-empty" class="stats-empty">No games recorded yet. Play a game to start building your statistics.</p>
         <div id="stats-content" class="stats-content">
           <section class="stats-section" aria-labelledby="stats-overview-heading">
@@ -434,7 +501,7 @@
           <button type="button" id="btn-reset-stats" class="btn btn--danger" disabled>Reset Statistics</button>
           <button type="button" id="btn-stats-back" class="btn btn--ghost">Back to Menu</button>
         </div>
-        <p class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
+        <p id="stats-local-note" class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
       </div>
     </section>
 

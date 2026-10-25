@@ -32,6 +32,367 @@
   let currentEpoch = 0;
   let focused = { row: 5, col: 0 };
   let savedCandidate = null;
+  let account = null;
+  let accountMode = "login";
+  let accountBusy = false;
+  let recovery = false;
+  let reauth = false;
+  let statsLoading = false;
+  let lastStats = null;
+  let authSubscription = null;
+  let authGeneration = 0;
+  let accountReturnScreen = "screen-title";
+
+  function accountStatus(text) { document.getElementById("account-status").textContent = text; }
+  function secureAccountContext() {
+    if (!isOnline()) throw new Error("Account actions require an internet connection. Local play still works offline.");
+    if (location.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) {
+      throw new Error("Accounts require HTTPS (localhost is allowed for development). Guest local play remains available.");
+    }
+  }
+  function validDisplayName(value) {
+    const name = value.trim();
+    if (!name || name.length > 20 || /[\u0000-\u001f\u007f<>]/.test(name)) {
+      throw new Error("Enter a display name of 1–20 characters, without control characters or < >.");
+    }
+    return name;
+  }
+  function authRedirect() {
+    secureAccountContext();
+    return location.origin + location.pathname;
+  }
+  function hasRoomIdentity() { return Boolean(state && state.room.status !== "closed" || getStored(storage.room)); }
+  function requireIdentitySwitchAllowed() {
+    if (hasRoomIdentity()) throw new Error("Leave your saved/current online room first. Sign Up can upgrade a guest without leaving; logging into a different account cannot transfer that seat.");
+  }
+  function renderAccount() {
+    const signedIn = Boolean(account);
+    const button = document.getElementById("btn-account");
+    button.textContent = signedIn ? "Account" : "Log In / Sign Up";
+    document.getElementById("btn-online-account").textContent = signedIn ? "Account" : "Upgrade Guest / Log In";
+    document.getElementById("account-menu-identity").textContent = signedIn ? account.displayName :
+      getStored(storage.name) || "Guest · 2-player & vs AI";
+    document.getElementById("account-auth").hidden = signedIn && !recovery && !reauth;
+    document.getElementById("account-profile").hidden = !signedIn || recovery || reauth;
+    document.getElementById("btn-menu-logout").hidden = !signedIn;
+    if (signedIn) {
+      document.getElementById("account-email-display").textContent = account.email || "Email confirmation pending";
+      document.getElementById("account-display-name").value = account.displayName;
+      ui.name.value = account.displayName;
+    } else ui.name.value = getStored(storage.name) || "";
+    ui.name.readOnly = signedIn;
+  }
+  function setAccountMode(mode) {
+    accountMode = mode;
+    for (const choice of ["login", "signup", "magic"]) {
+      const tab = document.getElementById("account-tab-" + choice);
+      tab.setAttribute("aria-selected", String(choice === mode));
+      tab.tabIndex = choice === mode ? 0 : -1;
+    }
+    const password = document.getElementById("account-password");
+    password.hidden = mode === "magic" || mode === "reset" ||
+      mode === "signup" && document.getElementById("account-signup-passwordless").checked;
+    password.required = !password.hidden;
+    password.autocomplete = mode === "signup" || recovery ? "new-password" : "current-password";
+    password.minLength = mode === "login" && !recovery ? 1 : 8;
+    document.getElementById("account-password-label").hidden = password.hidden;
+    document.getElementById("account-password-label").textContent = recovery ? "New password (at least 8 characters)" : "Password";
+    document.getElementById("account-email").required = !recovery;
+    document.getElementById("account-signup-name").hidden = mode !== "signup";
+    document.getElementById("account-new-name").required = mode === "signup";
+    document.getElementById("account-auth-panel").setAttribute("aria-labelledby",
+      "account-tab-" + (["reset"].includes(mode) ? "login" : mode));
+    document.getElementById("btn-account-submit").textContent = recovery ? "Save New Password" :
+      mode === "signup" ? "Create / Upgrade Account" : mode === "magic" ? "Send Magic Link" :
+      mode === "reset" ? "Send Password Reset" : "Log In";
+    document.getElementById("account-auth-hint").textContent = recovery ? "Choose a new password for the recovered account." :
+      mode === "signup" ? "Existing guests keep their Auth identity, room, replays, and local data. Confirm your email to complete the upgrade." :
+      mode === "magic" ? "Passwordless login for an existing account. To create/upgrade an account without a password, use Sign Up and select Magic Link below." :
+      "Account statistics are online-only. Guest/local statistics are never silently merged.";
+  }
+  async function syncAccount() {
+    const generation = ++authGeneration;
+    const service = await loadClient();
+    const session = (await service.auth.getSession()).data.session;
+    if (generation !== authGeneration) return;
+    const previous = userId;
+    const nextId = session?.user?.id || null;
+    if (previous && previous !== nextId) {
+      await stopChannel();
+      if (generation !== authGeneration) return;
+      state = null;
+      clearSelection();
+      pendingMove = false;
+      pendingPrevious = null;
+      savedCandidate = null;
+      clearStored(storage.room);
+      clearStored("damaPinoy.onlineRoomCode");
+      ui.rejoin.hidden = true;
+      globalThis.DamaPinoyApp.clearOnlineReplay();
+      ui.replaysList.replaceChildren();
+      ui.replaysStatus.textContent = "Load replays for the current identity.";
+      document.getElementById("account-stats-values").replaceChildren();
+      render();
+    }
+    userId = nextId;
+    account = null;
+    lastStats = null;
+    try {
+      if (session && session.user.is_anonymous !== true) {
+        setStored("damaPinoy.accountExpected", "1");
+        const result = await request("account", {}, true, session);
+        if (generation !== authGeneration || userId !== nextId) return;
+        account = result.account;
+      }
+    } catch (error) {
+      if (generation === authGeneration) throw error;
+    } finally {
+      if (generation === authGeneration) {
+        renderAccount();
+        globalThis.DamaPinoyApp.refreshStats();
+      }
+    }
+  }
+  async function openAccount() {
+    if (accountBusy) return;
+    reauth = false;
+    accountReturnScreen = document.getElementById("screen-online").hidden ? "screen-title" : "screen-online";
+    document.getElementById("btn-account-back").textContent = accountReturnScreen === "screen-online" ? "Back to Online" : "Back to Menu";
+    globalThis.DamaPinoyApp.showScreen("screen-account");
+    document.getElementById("account-new-name").value = ui.name.value || getStored(storage.name) || "Player";
+    accountBusy = true;
+    const controls = document.querySelectorAll("#screen-account button");
+    controls.forEach((button) => { button.disabled = true; });
+    accountStatus("Restoring account session…");
+    try {
+      secureAccountContext();
+      await syncAccount();
+      accountStatus(account ? "Your account identity and online records follow you across devices." :
+        "Guest play is available. Sign up to keep your identity across devices; local records stay separate.");
+    } catch (error) { accountStatus(error.message || "Could not restore account. Please log in again."); }
+    finally {
+      accountBusy = false;
+      controls.forEach((button) => { button.disabled = false; });
+    }
+  }
+  async function accountAction(work) {
+    if (accountBusy || busy) return;
+    accountBusy = true;
+    const controls = document.querySelectorAll("#screen-account button,#account-delete-dialog button");
+    controls.forEach((button) => { button.disabled = true; });
+    try { secureAccountContext(); await work(); }
+    catch (error) { accountStatus(error.message || "Account action failed. Please try again."); }
+    finally {
+      document.getElementById("account-password").value = "";
+      accountBusy = false;
+      controls.forEach((button) => { button.disabled = false; });
+      renderAccount();
+    }
+  }
+  async function submitAccount(event) {
+    event.preventDefault();
+    return accountAction(async () => {
+      const service = await loadClient();
+      const email = document.getElementById("account-email").value.trim();
+      const password = document.getElementById("account-password").value;
+      let result;
+      if (recovery) {
+        result = await service.auth.updateUser({ password });
+        if (result.error) throw new Error("Could not change password. Reopen the reset link or request a new one.");
+        recovery = false;
+        setAccountMode("login");
+        accountStatus("Password updated. Keep it private.");
+      } else if (accountMode === "signup") {
+        const name = validDisplayName(document.getElementById("account-new-name").value);
+        await ensureGuest();
+        const current = (await service.auth.getSession()).data.session;
+        if (current.user.is_anonymous !== true) throw new Error("You already have an account. Use Account to edit it.");
+        const passwordless = document.getElementById("account-signup-passwordless").checked;
+        result = await service.auth.updateUser({ email, ...(passwordless ? {} : { password }),
+          data: { display_name: name } }, { emailRedirectTo: authRedirect() });
+        if (result.error) throw new Error("Could not upgrade guest. Check the email/password or log into the existing account after leaving your room.");
+        accountStatus("Confirmation email requested. Open its link in this browser to finish upgrading the same guest identity. Your current room and local data are preserved.");
+      } else if (accountMode === "magic") {
+        requireIdentitySwitchAllowed();
+        result = await service.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: authRedirect() } });
+        if (result.error) throw new Error("Could not request a magic link. Try later or use email/password.");
+        accountStatus("If an account can use this email, a login link has been requested. Check your inbox and spam folder.");
+      } else if (accountMode === "reset") {
+        requireIdentitySwitchAllowed();
+        result = await service.auth.resetPasswordForEmail(email, { redirectTo: authRedirect() });
+        if (result.error) throw new Error("Could not request password reset. Try again later.");
+        accountStatus("If an account uses this email, a password reset link has been requested.");
+      } else {
+        if (hasRoomIdentity()) {
+          // Authenticate in isolation first: an expired SAME identity may resume
+          // its room, but a different login must not steal/drop the saved seat.
+          const expected = userId || getStored("damaPinoy.onlineRoomOwner") || getStored(storage.guest);
+          const checker = globalThis.supabase.createClient(config().supabaseUrl, config().publishableKey,
+            { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+              storageKey: "dama-account-reauth-check" } });
+          const checked = await checker.auth.signInWithPassword({ email, password });
+          if (checked.error || !checked.data?.session) throw new Error("Login failed. Check your credentials and email confirmation.");
+          if (!expected || checked.data.user.id !== expected) {
+            await checker.auth.signOut({ scope: "local" });
+            throw new Error("Leave your saved/current room before logging into a different account.");
+          }
+          result = await service.auth.setSession({ access_token: checked.data.session.access_token,
+            refresh_token: checked.data.session.refresh_token });
+        } else result = await service.auth.signInWithPassword({ email, password });
+        if (result.error) throw new Error("Login failed. Check your credentials and email confirmation, or reset your password.");
+        reauth = false;
+        accountStatus("Logged in. Your private online records are available.");
+      }
+      await syncAccount();
+    });
+  }
+  async function logoutAccount() {
+    return accountAction(async () => {
+      requireIdentitySwitchAllowed();
+      const service = await loadClient();
+      const result = await service.auth.signOut({ scope: "local" });
+      if (result.error) throw new Error("Logout failed. Check your connection and retry.");
+      clearStored("damaPinoy.accountExpected");
+      recovery = false;
+      await syncAccount();
+      accountStatus("Logged out. Local/guest statistics and preferences are unchanged. A new guest identity will be created when needed.");
+    });
+  }
+  function renderAccountStats() {
+    const section = document.getElementById("account-stats");
+    section.hidden = !account;
+    if (!account) return;
+    document.getElementById("account-stats-name").textContent = account.displayName + " · Online Statistics";
+    if (!lastStats && !statsLoading) loadAccountStats();
+  }
+  async function loadAccountStats() {
+    if (statsLoading || !account) return;
+    statsLoading = true;
+    const id = account.id;
+    const status = document.getElementById("account-stats-status");
+    status.textContent = "Loading private online results…";
+    try {
+      secureAccountContext();
+      const session = (await client.auth.getSession()).data.session;
+      if (!session || session.user.id !== id || account?.id !== id) return;
+      const result = await request("account-stats", {}, true, session);
+      if (account?.id !== id) return;
+      lastStats = result.stats;
+      const games = result.stats.games, series = result.stats.series;
+      const values = { "Games played": games.played, Wins: games.wins, Losses: games.losses, Draws: games.draws,
+        "Captures for": games.capturesFor, "Captures against": games.capturesAgainst,
+        "Average moves": games.averageMoves, "Matches played": series.played,
+        "Matches won": series.wins, "Matches lost": series.losses, "Matches drawn": series.draws };
+      const list = document.getElementById("account-stats-values");
+      list.replaceChildren();
+      for (const [label, value] of Object.entries(values)) {
+        const dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = label; dd.textContent = String(value); list.append(dt, dd);
+      }
+      status.textContent = games.played ? "Server-validated completed games and matches." : "No account online games recorded yet.";
+    } catch (error) { status.textContent = error.message || "Could not load account statistics."; }
+    finally { statsLoading = false; }
+  }
+
+  function initAccount() {
+    document.getElementById("btn-account").addEventListener("click", openAccount);
+    document.getElementById("btn-online-account").addEventListener("click", openAccount);
+    document.getElementById("btn-account-back").addEventListener("click", () => globalThis.DamaPinoyApp.showScreen(accountReturnScreen));
+    document.getElementById("account-form").addEventListener("submit", submitAccount);
+    for (const [index, mode] of ["login", "signup", "magic"].entries()) {
+      const tab = document.getElementById("account-tab-" + mode);
+      tab.addEventListener("click", () => { recovery = false; setAccountMode(mode); renderAccount(); });
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const target = event.key === "Home" ? 0 : event.key === "End" ? 2 :
+          (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+        const next = ["login", "signup", "magic"][target];
+        setAccountMode(next);
+        document.getElementById("account-tab-" + next).focus();
+      });
+    }
+    document.getElementById("account-signup-passwordless").addEventListener("change", () => setAccountMode("signup"));
+    document.getElementById("btn-account-reset").addEventListener("click", () => { recovery = false; setAccountMode("reset"); });
+    document.getElementById("account-profile-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      accountAction(async () => {
+        if (!account) throw new Error("Log in to edit your profile.");
+        const name = validDisplayName(document.getElementById("account-display-name").value);
+        const service = await loadClient();
+        const result = await service.from("profiles").update({ display_name: name }).eq("id", account.id).select("display_name").single();
+        if (result.error) throw new Error("Could not save display name. Check your session and try again.");
+        await syncAccount();
+        accountStatus("Display name saved. Existing game names stay unchanged; new rooms use the updated name.");
+      });
+    });
+    document.getElementById("btn-account-logout").addEventListener("click", logoutAccount);
+    document.getElementById("btn-account-reauth").addEventListener("click", () => {
+      if (!account || accountBusy) return;
+      reauth = true; recovery = false;
+      document.getElementById("account-email").value = account?.email || "";
+      setAccountMode("login");
+      renderAccount();
+      accountStatus("Log in again to confirm your identity. The same account keeps its current room; a different account cannot take the seat.");
+    });
+    document.getElementById("btn-menu-logout").addEventListener("click", async () => {
+      globalThis.DamaPinoyApp.showScreen("screen-account");
+      await logoutAccount();
+    });
+    document.getElementById("btn-account-guest").addEventListener("click", logoutAccount);
+    document.getElementById("btn-account-stats").addEventListener("click", () => {
+      lastStats = null;
+      globalThis.DamaPinoyApp.openStats();
+    });
+    document.getElementById("btn-account-stats-refresh").addEventListener("click", loadAccountStats);
+    document.getElementById("btn-account-replays").addEventListener("click", async () => { await openOnline(); await loadReplays(); });
+    const dialog = document.getElementById("account-delete-dialog");
+    document.getElementById("btn-account-delete").addEventListener("click", () => {
+      document.getElementById("account-delete-confirm").value = "";
+      dialog.showModal();
+    });
+    document.getElementById("btn-account-delete-confirm").addEventListener("click", () => {
+      if (document.getElementById("account-delete-confirm").value !== "DELETE") {
+        document.getElementById("account-delete-confirm").focus(); return;
+      }
+      dialog.close();
+      accountAction(async () => {
+        if (!account) throw new Error("Log in before deleting your account.");
+        const result = await request("delete-account", { confirmation: "DELETE" }, true);
+        if (!result.deleted) throw new Error("Account deletion was not completed.");
+        await stopChannel();
+        state = null;
+        savedCandidate = null;
+        clearSelection();
+        clearStored(storage.room);
+        clearStored("damaPinoy.onlineRoomCode");
+        clearStored("damaPinoy.accountExpected");
+        // Local signout also clears an already-invalid token after server deletion.
+        await client.auth.signOut({ scope: "local" });
+        account = null; userId = null; recovery = false; lastStats = null;
+        ui.replaysList.replaceChildren();
+        ui.replaysStatus.textContent = "Load replays for the current identity.";
+        document.getElementById("account-stats-values").replaceChildren();
+        globalThis.DamaPinoyApp.clearOnlineReplay();
+        render();
+        renderAccount();
+        globalThis.DamaPinoyApp.refreshStats();
+        accountStatus("Account deleted. Shared records were anonymized; local data was preserved.");
+      });
+    });
+    setAccountMode("login");
+    renderAccount();
+    let storedSession = false;
+    try {
+      const ref = new URL(config().supabaseUrl).hostname.split(".")[0];
+      storedSession = Boolean(getStored("sb-" + ref + "-auth-token"));
+    } catch (error) { /* Account setup may be unavailable; local play is unaffected. */ }
+    const callback = new URLSearchParams(location.search).has("code") || /(?:access_token|type=recovery|error_description)=/.test(location.hash);
+    if (isOnline() && (storedSession || callback)) {
+      if (callback) globalThis.DamaPinoyApp.showScreen("screen-account");
+      syncAccount().catch(() => accountStatus("Could not restore session. Log in again or continue as guest. Local data is unchanged."));
+    }
+  }
 
   function isSpectator() { return state?.role === "spectator"; }
 
@@ -105,7 +466,21 @@
         if (!globalThis.supabase?.createClient) throw new Error("Could not load the online service.");
         client = globalThis.supabase.createClient(settings.supabaseUrl.replace(/\/$/, ""),
           settings.publishableKey, { auth: { persistSession: true,
-            autoRefreshToken: true, detectSessionInUrl: false } });
+            autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } });
+        if (client.auth.onAuthStateChange && !authSubscription) {
+          authSubscription = client.auth.onAuthStateChange((event) => {
+            if (event === "PASSWORD_RECOVERY") {
+              recovery = true;
+              globalThis.DamaPinoyApp.showScreen("screen-account");
+              setAccountMode("login");
+              accountStatus("Recovery link accepted. Enter a new password.");
+            }
+            // Never await Supabase calls inside its Auth callback/lock.
+            setTimeout(() => syncAccount().catch(() => {
+              accountStatus("Session could not be restored. Please log in again. Local play remains available.");
+            }), 0);
+          }).data.subscription;
+        }
         return client;
       })().catch(function (error) { clientPromise = null; throw error; });
     }
@@ -119,6 +494,9 @@
       let { data, error } = await service.auth.getSession();
       if (error) throw new Error("Could not restore your guest session.");
       if (!data.session) {
+        if (account || getStored("damaPinoy.accountExpected")) {
+          throw new Error("Account session expired. Open Account to log in again or explicitly Continue as Guest.");
+        }
         ({ data, error } = await service.auth.signInAnonymously());
         if (error || !data.user) throw new Error("Could not start a guest session.");
         userId = data.user.id;
@@ -131,9 +509,9 @@
     return guestPromise;
   }
 
-  async function request(action, details = {}, raw = false) {
-    const service = await ensureGuest();
-    const session = (await service.auth.getSession()).data.session;
+  async function request(action, details = {}, raw = false, knownSession = null) {
+    const service = knownSession ? client : await ensureGuest();
+    const session = knownSession || (await service.auth.getSession()).data.session;
     if (!session?.access_token) throw new Error("Guest session expired. Try again.");
     const settings = config();
     const controller = new AbortController();
@@ -159,6 +537,9 @@
       throw new Error("Online service is unavailable. Try again.");
     }
     if (!response.ok || (!raw && !result?.state && !result?.left)) {
+      if (response.status === 401 && (!knownSession || knownSession.user.id === userId)) {
+        accountStatus("Session expired. Please log in again. Local play is still available.");
+      }
       throw new Error(typeof result?.error === "string" ? result.error :
         "Online service is unavailable. Try again.");
     }
@@ -403,6 +784,9 @@
     ui.spectatorBadge.hidden = !isSpectator();
     if (isSpectator()) ui.gamePlayers.textContent = room.hostName + " (" +
       colorName(state.game.hostColor) + ") vs " + room.guestName + " (" + colorName(state.game.guestColor) + ")";
+    if (typeof room.hostAccount === "boolean") ui.gamePlayers.textContent = room.hostName +
+      " (" + colorName(state.game.hostColor) + " · " + (room.hostAccount ? "Account" : "Guest") + ") vs " +
+      room.guestName + " (" + colorName(state.game.guestColor) + " · " + (room.guestAccount ? "Account" : "Guest") + ")";
     const finished = state.game.status === "finished";
     const matchOver = room.status === "finished";
     ui.turn.textContent = finished ? (matchOver ? "Match over" : "Game over") :
@@ -433,7 +817,7 @@
     ui.rematch.hidden = isSpectator() || !finished || room.status === "closed";
     ui.replayActions.hidden = !finished || room.status === "closed";
     ui.spectators.textContent = "Spectators (" + (state.spectators || []).length + "/5): " +
-      ((state.spectators || []).map((s) => s.name).join(", ") || "None");
+      ((state.spectators || []).map((s) => s.name + (s.account ? " (Account)" : " (Guest)")).join(", ") || "None");
     const last = state.moves[state.moves.length - 1];
     ui.lastMove.textContent = last ? "Last move: " + colorName(last.playerColor) + " " +
       [last.from, ...last.path].map((s) => String.fromCharCode(97 + s.col) + (8 - s.row))
@@ -476,6 +860,7 @@
     } else {
       setStored(storage.room, state.room.id);
       setStored("damaPinoy.onlineRoomCode", state.room.code);
+      setStored("damaPinoy.onlineRoomOwner", userId);
       if (!channel) await watchRoom(state.room.id);
     }
     render();
@@ -725,7 +1110,8 @@
     try {
       const next = await request(action, action === "create"
         ? { name, color, format } : { name, code });
-      setStored(storage.name, name);
+      if (!account && !getStored("damaPinoy.accountExpected")) setStored(storage.name, name);
+      renderAccount();
       await applyState(next);
       if (action === "join") notify("player-joined");
     } catch (error) {
@@ -837,7 +1223,10 @@
   async function viewOnlineReplay(details, download = false) {
     try {
       if (!isOnline()) throw new Error("Online replays require an internet connection.");
+      await ensureGuest();
+      const identity = userId;
       const result = await request("replay", details, true);
+      if (identity !== userId) return;
       if (!globalThis.DamaPinoyApp.openOnlineReplay(replayFile(result.replay), download)) {
         throw new Error("Could not export this replay.");
       }
@@ -852,7 +1241,10 @@
     ui.replaysStatus.textContent = "Loading online replays…";
     try {
       if (!isOnline()) throw new Error("Online replays require an internet connection. Local replay viewing still works offline.");
+      await ensureGuest();
+      const identity = userId;
       const result = await request("replays", {}, true);
+      if (identity !== userId) return;
       if (!Array.isArray(result.replays) || result.replays.length > 20) throw new Error("Invalid replay list.");
       ui.replaysList.replaceChildren();
       for (const replay of result.replays) {
@@ -1013,6 +1405,7 @@
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state) synchronize();
     });
+    initAccount();
   }
 
   if (globalThis.__DAMA_TEST__) {
@@ -1021,8 +1414,10 @@
       getState: () => state, getSelection: () => selection,
       getUserId: () => userId, synchronize,
       replayFile, loadReplays, rejoinSaved,
+      openAccount, syncAccount, getAccount: () => account,
     };
   }
+  globalThis.DamaPinoyAccount = Object.freeze({ isLoggedIn: () => Boolean(account), renderStats: renderAccountStats });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

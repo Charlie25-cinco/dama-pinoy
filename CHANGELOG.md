@@ -2,6 +2,12 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.3.0 — 2026-10-26
+
+- **Added:** Optional email/password and passwordless email-link accounts, anonymous-identity upgrades, profile editing, session restoration, recovery UI, logout, and confirmed account deletion.
+- **Added:** Private cross-device account statistics recorded only from server-validated online games/matches. Guest/local statistics and Last Replay are preserved and never silently merged; existing Auth-owned replay access follows the account across devices.
+- **Changed:** Players and spectators support guest/account identity labels. Account deletion removes private records and anonymizes retained shared match/replay history. Refreshed the offline cache and excluded query-bearing/authenticated responses from caching.
+
 ## 2.2.0 — 2026-10-25
 
 - **Added:** Transactionally recorded online replays with participant-only recent history (latest 20), validated viewing/export, and per-player board orientation, separate from local Last Replay and statistics.

@@ -448,6 +448,22 @@
 
   function renderStats() {
     if (!dom.statValues) return;
+    const signedIn = Boolean(globalThis.DamaPinoyAccount?.isLoggedIn());
+    const source = document.getElementById("stats-source");
+    const localNote = document.getElementById("stats-local-note");
+    if (source) source.textContent = signedIn ? "Your private, server-validated online results across devices." :
+      "Your completed games and series on this device.";
+    if (localNote) localNote.hidden = signedIn;
+    if (dom.btnResetStats) dom.btnResetStats.hidden = signedIn;
+    if (signedIn) {
+      if (dom.statsContent) dom.statsContent.hidden = true;
+      if (dom.statsEmpty) dom.statsEmpty.hidden = true;
+      if (dom.btnResetStats) dom.btnResetStats.disabled = true;
+      globalThis.DamaPinoyAccount.renderStats();
+      return;
+    }
+    const accountStats = document.getElementById("account-stats");
+    if (accountStats) accountStats.hidden = true;
     const overall = stats.overall;
     const values = {
       "overall-games": overall.gamesPlayed,
@@ -3927,7 +3943,13 @@
   }
 
   // The separate online client only needs the shared screen-navigation contract.
-  globalThis.DamaPinoyApp = Object.freeze({ showScreen,
+  globalThis.DamaPinoyApp = Object.freeze({ showScreen, openStats, refreshStats: renderStats,
+    clearOnlineReplay() {
+      if (replayState?.data.mode !== "online") return;
+      stopReplayPlayback();
+      replayState = null;
+      if (isReplayScreenOpen()) showScreen("screen-account");
+    },
     openOnlineReplay(file, download = false) {
       const imported = deserializeReplay(file);
       openReplayData(imported.data, "screen-online", imported.exportedAt, imported.view);

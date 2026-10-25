@@ -1,4 +1,4 @@
-// Dama Pinoy v2.2. Deploy with JWT verification enabled. Never bundle this
+// Dama Pinoy v2.3. Deploy with JWT verification enabled. Never bundle this
 // function or its service-role environment variable into the frontend.
 import "../../../online-rules.js";
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
@@ -60,6 +60,10 @@ async function snapshot(db, roomId, userId, attempt = 0) {
   if (!isPlayer && !(spectators.data || []).some((s) => s.guest_id === userId)) {
     throw new Error("Room unavailable.");
   }
+  const identities = await db.from("profiles").select("id").in("id",
+    [room.host_user_id, room.guest_user_id, ...(spectators.data || []).map((s) => s.guest_id)].filter(Boolean));
+  if (identities.error) throw new Error("Room unavailable.");
+  const accounts = new Set((identities.data || []).map((p) => p.id));
   let game = null;
   let moves = [];
   if (room.guest_user_id) {
@@ -84,11 +88,13 @@ async function snapshot(db, roomId, userId, attempt = 0) {
   }
   return {
     role: isPlayer ? "player" : "spectator",
-    spectators: (spectators.data || []).map((s) => ({ id: s.guest_id, name: s.guest_name })),
+    spectators: (spectators.data || []).map((s) => ({ id: s.guest_id, name: s.guest_name,
+      account: accounts.has(s.guest_id) })),
     room: {
       id: room.id, code: room.room_code, status: room.status,
       hostId: room.host_user_id, guestId: room.guest_user_id,
       hostName: room.host_name, guestName: room.guest_name,
+      hostAccount: accounts.has(room.host_user_id), guestAccount: accounts.has(room.guest_user_id),
       hostColor: room.host_color, guestColor: room.guest_color,
       turn: room.current_turn, version: room.version,
       seriesFormat: room.series_format,
@@ -143,16 +149,39 @@ Deno.serve(async (request) => {
     const auth = createClient(url, publicKey, { auth: { persistSession: false } });
     const verified = await auth.auth.getUser(token);
     const user = verified.data?.user;
-    if (verified.error || !user || user.is_anonymous !== true) {
-      return reply({ error: "Guest session unavailable. Reopen Online Multiplayer." }, 401);
+    if (verified.error || !user) {
+      return reply({ error: "Session expired. Reopen Account or Online Multiplayer to sign in again." }, 401);
     }
     const db = createClient(url, serviceKey, { auth: { persistSession: false } });
     const userId = user.id;
+    const accountUser = user.is_anonymous !== true;
+    const profile = accountUser ? await db.from("profiles").select("display_name").eq("id", userId).single() : null;
+    if (accountUser && (profile.error || !profile.data)) {
+      return reply({ error: "Account profile unavailable. Please sign in again." }, 403);
+    }
     let id;
 
     switch (body.action) {
+      case "account": {
+        if (!accountUser) return reply({ account: null });
+        return reply({ account: { id: userId, displayName: profile.data.display_name, email: user.email } });
+      }
+      case "account-stats": {
+        if (!accountUser) return reply({ error: "Log in to view account statistics." }, 403);
+        return reply({ stats: await rpc(db, "online_account_stats", { p_user: userId }) });
+      }
+      case "delete-account": {
+        if (!accountUser || body.confirmation !== "DELETE") return reply({ error: "Account deletion requires confirmation." }, 403);
+        const signedInAt = new Date(user.last_sign_in_at || "").getTime();
+        if (!Number.isFinite(signedInAt) || Date.now() - signedInAt > 900000) {
+          return reply({ error: "Log in again before deleting your account (within 15 minutes)." }, 403);
+        }
+        const deleted = await db.auth.admin.deleteUser(userId);
+        if (deleted.error) return reply({ error: "Account deletion failed. Please try again." }, 400);
+        return reply({ deleted: true });
+      }
       case "create": {
-        const name = guestName(body.name);
+        const name = guestName(accountUser ? profile.data.display_name : body.name);
         const options = roomOptions(body);
         const recent = await db.from("rooms").select("id", { count: "exact", head: true })
           .eq("host_user_id", userId)
@@ -175,7 +204,7 @@ Deno.serve(async (request) => {
       }
       case "spectate":
       case "join": {
-        const name = guestName(body.name);
+        const name = guestName(accountUser ? profile.data.display_name : body.name);
         const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
         if (!new RegExp("^[" + alphabet + "]{6}$").test(code)) {
           throw new Error("Enter a valid six-character room code.");

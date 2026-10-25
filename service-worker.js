@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "dama-pinoy-v2.2.0";
+const CACHE_NAME = "dama-pinoy-v2.3.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -55,6 +55,9 @@ self.addEventListener("fetch", function (event) {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Auth callbacks may contain a one-time PKCE code. Never cache credentials
+  // or query-bearing responses, even when hosted on the app's own origin.
+  if (url.search || request.headers.has("authorization")) return;
 
   event.respondWith(
     caches.match(request).then(function (cached) {
