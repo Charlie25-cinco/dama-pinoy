@@ -4,12 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#452617">
-  <meta name="description" content="Dama Pinoy — a traditional Filipino two-player checkers game that runs offline in your browser.">
+  <meta name="description" content="Dama Pinoy — traditional Filipino checkers for two players or against the computer, playable offline in your browser.">
   <title>Dama Pinoy — Traditional Filipino Checkers</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23452617'/%3E%3Crect x='5' y='5' width='10' height='10' fill='%23ecd7b4'/%3E%3Crect x='17' y='17' width='10' height='10' fill='%23ecd7b4'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23b3261e'/%3E%3C/svg%3E">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <script>
+    (function () {
+      try {
+        var stored = window.localStorage.getItem("damaPinoy.theme");
+        if (stored === "wood" || stored === "night" || stored === "light") {
+          document.documentElement.setAttribute("data-theme", stored);
+        }
+      } catch (error) {
+        /* Storage can be unavailable on file:// in some browsers. */
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="app">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <main class="app" id="main" tabindex="-1">
 
     <section id="screen-title" class="screen screen--title" aria-labelledby="title-heading">
       <div class="title-card">
@@ -22,16 +39,147 @@
         <p class="eyebrow">Larong Pinoy</p>
         <h1 id="title-heading" tabindex="-1">Dama Pinoy</h1>
         <p class="subtitle">Traditional Filipino Checkers</p>
-        <p class="lede">Two players, one board. Mandatory captures, longest-chain jumps, and Dama promotions — played the way it is at home.</p>
+        <p class="lede">Play a friend on one device or challenge the computer. Mandatory captures, longest-chain jumps, and Dama promotions — played the way it is at home.</p>
+        <fieldset class="mode-picker">
+          <legend class="mode-picker__legend">Game mode</legend>
+          <div class="mode-options">
+            <label class="mode-option">
+              <input type="radio" name="game-mode" value="twoPlayer" checked>
+              <span class="mode-option__body">
+                <span class="mode-option__title">Two Players</span>
+                <span class="mode-option__hint">Pass and play</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="game-mode" value="vsComputer">
+              <span class="mode-option__body">
+                <span class="mode-option__title">vs Computer</span>
+                <span class="mode-option__hint">Play the AI</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset class="mode-picker format-picker">
+          <legend class="mode-picker__legend">Match format</legend>
+          <div class="mode-options format-options">
+            <label class="mode-option">
+              <input type="radio" name="match-format" value="single" checked>
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Single Game</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="match-format" value="bestOfThree">
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Best of 3</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="match-format" value="bestOfFive">
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Best of 5</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="match-format" value="bestOfNine">
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Best of 9</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset class="mode-picker color-picker">
+          <legend id="color-legend" class="mode-picker__legend">Player 1 color in Game 1</legend>
+          <div class="mode-options color-options">
+            <label class="mode-option">
+              <input type="radio" name="player-color" value="R" checked>
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Red · first</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="player-color" value="B">
+              <span class="mode-option__body mode-option__body--compact">
+                <span class="mode-option__title">Blue · second</span>
+              </span>
+            </label>
+          </div>
+          <p class="color-note">Red opens every game. Players swap colors each game in a series.</p>
+        </fieldset>
+        <div class="difficulty-field" id="difficulty-field" hidden>
+          <label class="field-label" for="ai-difficulty">Computer difficulty</label>
+          <select id="ai-difficulty" class="select">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
         <div class="button-row">
           <button type="button" id="btn-start" class="btn btn--primary">Start Game</button>
           <button type="button" id="btn-howto" class="btn btn--ghost">How to Play</button>
+          <button type="button" id="btn-stats" class="btn btn--ghost">Statistics</button>
+          <button type="button" id="btn-online" class="btn btn--ghost">Online Multiplayer</button>
+          <button type="button" id="btn-import-replay" class="btn btn--ghost">Import Replay</button>
+          <button type="button" id="btn-last-replay" class="btn btn--ghost" aria-label="View the last saved game replay" hidden>Last Replay</button>
         </div>
         <ul class="title-facts">
-          <li>Local 2-player</li>
+          <li>2-player &amp; vs AI</li>
+          <li>Best of 3/5/9 &amp; replay</li>
           <li>Works offline</li>
-          <li>No install</li>
         </ul>
+      </div>
+    </section>
+
+    <section id="screen-online" class="screen screen--online" aria-labelledby="online-heading" hidden>
+      <div class="online-panel">
+        <p class="eyebrow">Play across devices</p>
+        <h2 id="online-heading" tabindex="-1">Online Multiplayer</h2>
+        <p class="online-intro">Single Game with a friend. Share a room code to play live; Red always opens.</p>
+        <p id="online-status" class="online-status" role="status" aria-live="polite">Enter a guest name to get started.</p>
+
+        <div id="online-entry" class="online-entry">
+          <label class="field-label" for="online-name">Guest name</label>
+          <input id="online-name" class="name-input online-input" type="text" maxlength="20" autocomplete="nickname" placeholder="Your name" required>
+          <button type="button" id="btn-create-room" class="btn btn--primary">Create Room</button>
+          <div class="online-divider" aria-hidden="true">or join a friend</div>
+          <label class="field-label" for="online-code">Six-character room code</label>
+          <input id="online-code" class="name-input online-input online-code-input" type="text" maxlength="6" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7Q2XN" aria-describedby="online-code-hint">
+          <p id="online-code-hint" class="online-hint">Letters and numbers, without 0, O, 1, I, or L.</p>
+          <button type="button" id="btn-join-room" class="btn btn--ghost">Join Room</button>
+          <button type="button" id="btn-online-back" class="btn btn--ghost">Back to Menu</button>
+        </div>
+
+        <div id="online-waiting" class="online-waiting" hidden>
+          <p class="online-label">Room code</p>
+          <strong id="online-room-code" class="online-room-code">------</strong>
+          <button type="button" id="btn-copy-room" class="btn btn--ghost">Copy Room Code</button>
+          <p id="online-waiting-players" class="online-players">Waiting for opponent…</p>
+          <p class="online-hint">Keep this page open. The game starts when a second player joins.</p>
+          <button type="button" id="btn-online-wait-leave" class="btn btn--ghost">Leave Room</button>
+        </div>
+
+        <div id="online-match" class="game-layout online-layout" hidden>
+          <div class="board-area">
+            <div class="board-shell">
+              <div id="online-files" class="coords coords--files" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span></div>
+              <div id="online-ranks" class="coords coords--ranks" aria-hidden="true"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span></div>
+              <div id="online-board" class="board" role="grid" aria-label="Online Dama board"></div>
+            </div>
+          </div>
+          <aside class="side-panel online-side" aria-label="Online match controls">
+            <p class="online-label">Room <strong id="online-game-code">------</strong></p>
+            <p id="online-connection" class="online-connection" role="status">Connecting…</p>
+            <h3 id="online-turn" class="online-turn">Waiting for players</h3>
+            <p id="online-game-players" class="online-players"></p>
+            <p id="online-result" class="online-result" hidden></p>
+            <section class="history" aria-labelledby="online-history-heading">
+              <h4 id="online-history-heading" class="panel-title">Move history</h4>
+              <ol id="online-history" class="move-list" tabindex="0" aria-label="Online moves"></ol>
+            </section>
+            <button type="button" id="btn-online-rematch" class="btn btn--primary" hidden>Request Rematch</button>
+            <button type="button" id="btn-online-leave" class="btn btn--ghost">Leave Room</button>
+          </aside>
+        </div>
       </div>
     </section>
 
@@ -40,17 +188,181 @@
         <p class="eyebrow">Quick reference</p>
         <h2 id="howto-heading" tabindex="-1">How to Play</h2>
         <ol class="rules">
-          <li><strong>Red moves first.</strong> Players take turns on the same device.</li>
+          <li><strong>Red moves first in every game in Dama Pinoy.</strong> Choose your Game 1 color (or Player 1's color in Two Players). The board is shown from Player 1's side, so their pieces stay at the bottom even when they play Blue; the replay keeps that game's view. In Best of 3, 5, or 9, the players exchange colors each game; names and scores stay with their players. First to 2, 3, or 5 wins respectively takes the match. Drawn games count toward the limit without scoring; at the limit, the higher series score wins or a tie draws the match.</li>
           <li><strong>Pieces move diagonally forward.</strong> A normal piece steps one dark square forward.</li>
           <li><strong>Captures are mandatory.</strong> Jump over an adjacent enemy piece to the empty square beyond — forward or backward.</li>
           <li><strong>Choose the biggest capture.</strong> You must follow the capture path that removes the most pieces.</li>
-          <li><strong>Reach the opposite end to become a Dama.</strong> Promotion happens immediately and ends that turn.</li>
-          <li><strong>A Dama moves and captures in all diagonal directions</strong>, sliding any distance over empty squares.</li>
+          <li><strong>Reach the opposite end to become a Dama.</strong> If the capture chain continues after reaching the last row, keep jumping as an ordinary piece. It becomes a Dama only when the turn ends there.</li>
+          <li><strong>A Dama moves any distance along an empty diagonal.</strong> It captures by jumping an adjacent enemy piece and landing on the very next square beyond it, forward or backward.</li>
           <li><strong>Capture all opponent pieces or block all their moves to win.</strong> If both sides make 100 moves with no capture or promotion, the game is a draw.</li>
         </ol>
+        <p class="mode-note"><strong>Playing vs Computer?</strong> Choose Red to move first in Game 1, or Blue to let the computer open as Red. In a series match, you and the computer swap colors after each game. The computer follows the same Dama rules and keeps your chosen Easy, Medium, or Hard difficulty for the whole match.</p>
+        <p class="mode-note"><strong>Statistics:</strong> Completed games and matches are saved on this device. Local two-player results are recorded from Player 1's perspective; vs Computer results are from your perspective. Reset Statistics clears only the statistics record.</p>
+        <p class="mode-note"><strong>Replay files:</strong> Export a completed replay from Game Over or the replay viewer. Import a Dama Pinoy replay JSON file from the menu or viewer to watch it without replacing the saved Last Replay.</p>
+        <p class="mode-note"><strong>Online Multiplayer:</strong> Two guests can play a Single Game with a six-character room code. An internet connection is required; local play still works offline. Red opens each game, and both players can request a rematch after it ends.</p>
         <div class="button-row button-row--start">
           <button type="button" id="btn-howto-back" class="btn btn--ghost">Back</button>
         </div>
+      </div>
+    </section>
+
+    <section id="screen-stats" class="screen screen--stats" aria-labelledby="stats-heading" hidden>
+      <div class="stats-card">
+        <p class="eyebrow">Match record</p>
+        <h2 id="stats-heading" tabindex="-1">Statistics</h2>
+        <p class="stats-intro">Your completed games and series on this device.</p>
+        <p id="stats-empty" class="stats-empty">No games recorded yet. Play a game to start building your statistics.</p>
+        <div id="stats-content" class="stats-content">
+          <section class="stats-section" aria-labelledby="stats-overview-heading">
+            <h3 id="stats-overview-heading" class="stats-section__title">Overview</h3>
+            <dl class="stats-metric-grid">
+              <div class="stats-metric">
+                <dt>Games</dt>
+                <dd data-stat="overall-games">0</dd>
+              </div>
+              <div class="stats-metric stats-metric--win">
+                <dt>Wins</dt>
+                <dd data-stat="overall-wins">0</dd>
+              </div>
+              <div class="stats-metric stats-metric--loss">
+                <dt>Losses</dt>
+                <dd data-stat="overall-losses">0</dd>
+              </div>
+              <div class="stats-metric stats-metric--draw">
+                <dt>Draws</dt>
+                <dd data-stat="overall-draws">0</dd>
+              </div>
+              <div class="stats-metric">
+                <dt>Win rate</dt>
+                <dd data-stat="overall-win-rate">0%</dd>
+              </div>
+              <div class="stats-metric">
+                <dt>Current streak</dt>
+                <dd data-stat="overall-current-streak">0</dd>
+              </div>
+              <div class="stats-metric">
+                <dt>Longest streak</dt>
+                <dd data-stat="overall-longest-streak">0</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="stats-section" aria-labelledby="stats-mode-heading">
+            <h3 id="stats-mode-heading" class="stats-section__title">By Mode</h3>
+            <div class="stats-card-grid">
+              <article class="stats-mode">
+                <h4>Local two-player</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="mode-two-player-games">0</dd></div>
+                  <div><dt>Wins</dt><dd data-stat="mode-two-player-wins">0</dd></div>
+                  <div><dt>Losses</dt><dd data-stat="mode-two-player-losses">0</dd></div>
+                  <div><dt>Draws</dt><dd data-stat="mode-two-player-draws">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="mode-two-player-win-rate">0%</dd></div>
+                  <div><dt>Current streak</dt><dd data-stat="mode-two-player-current-streak">0</dd></div>
+                  <div><dt>Longest streak</dt><dd data-stat="mode-two-player-longest-streak">0</dd></div>
+                </dl>
+              </article>
+
+              <article class="stats-mode">
+                <h4>vs Easy AI</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="mode-vs-easy-games">0</dd></div>
+                  <div><dt>Wins</dt><dd data-stat="mode-vs-easy-wins">0</dd></div>
+                  <div><dt>Losses</dt><dd data-stat="mode-vs-easy-losses">0</dd></div>
+                  <div><dt>Draws</dt><dd data-stat="mode-vs-easy-draws">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="mode-vs-easy-win-rate">0%</dd></div>
+                  <div><dt>Current streak</dt><dd data-stat="mode-vs-easy-current-streak">0</dd></div>
+                  <div><dt>Longest streak</dt><dd data-stat="mode-vs-easy-longest-streak">0</dd></div>
+                </dl>
+              </article>
+
+              <article class="stats-mode">
+                <h4>vs Medium AI</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="mode-vs-medium-games">0</dd></div>
+                  <div><dt>Wins</dt><dd data-stat="mode-vs-medium-wins">0</dd></div>
+                  <div><dt>Losses</dt><dd data-stat="mode-vs-medium-losses">0</dd></div>
+                  <div><dt>Draws</dt><dd data-stat="mode-vs-medium-draws">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="mode-vs-medium-win-rate">0%</dd></div>
+                  <div><dt>Current streak</dt><dd data-stat="mode-vs-medium-current-streak">0</dd></div>
+                  <div><dt>Longest streak</dt><dd data-stat="mode-vs-medium-longest-streak">0</dd></div>
+                </dl>
+              </article>
+
+              <article class="stats-mode">
+                <h4>vs Hard AI</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="mode-vs-hard-games">0</dd></div>
+                  <div><dt>Wins</dt><dd data-stat="mode-vs-hard-wins">0</dd></div>
+                  <div><dt>Losses</dt><dd data-stat="mode-vs-hard-losses">0</dd></div>
+                  <div><dt>Draws</dt><dd data-stat="mode-vs-hard-draws">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="mode-vs-hard-win-rate">0%</dd></div>
+                  <div><dt>Current streak</dt><dd data-stat="mode-vs-hard-current-streak">0</dd></div>
+                  <div><dt>Longest streak</dt><dd data-stat="mode-vs-hard-longest-streak">0</dd></div>
+                </dl>
+              </article>
+            </div>
+          </section>
+
+          <section class="stats-section" aria-labelledby="stats-series-heading">
+            <h3 id="stats-series-heading" class="stats-section__title">Series Results</h3>
+            <div class="stats-card-grid stats-card-grid--series">
+              <article class="stats-mode">
+                <h4>Best of 3</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="series-best-of-3-played">0</dd></div>
+                  <div><dt>Won</dt><dd data-stat="series-best-of-3-won">0</dd></div>
+                  <div><dt>Lost</dt><dd data-stat="series-best-of-3-lost">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="series-best-of-3-win-rate">0%</dd></div>
+                </dl>
+              </article>
+
+              <article class="stats-mode">
+                <h4>Best of 5</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="series-best-of-5-played">0</dd></div>
+                  <div><dt>Won</dt><dd data-stat="series-best-of-5-won">0</dd></div>
+                  <div><dt>Lost</dt><dd data-stat="series-best-of-5-lost">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="series-best-of-5-win-rate">0%</dd></div>
+                </dl>
+              </article>
+
+              <article class="stats-mode">
+                <h4>Best of 9</h4>
+                <dl class="stats-mode__grid">
+                  <div><dt>Played</dt><dd data-stat="series-best-of-9-played">0</dd></div>
+                  <div><dt>Won</dt><dd data-stat="series-best-of-9-won">0</dd></div>
+                  <div><dt>Lost</dt><dd data-stat="series-best-of-9-lost">0</dd></div>
+                  <div><dt>Win rate</dt><dd data-stat="series-best-of-9-win-rate">0%</dd></div>
+                </dl>
+              </article>
+            </div>
+          </section>
+
+          <section class="stats-section" aria-labelledby="stats-capture-heading">
+            <h3 id="stats-capture-heading" class="stats-section__title">Capture and Game Data</h3>
+            <dl class="stats-metric-grid stats-metric-grid--capture">
+              <div class="stats-metric">
+                <dt>Captures made</dt>
+                <dd data-stat="captures-for">0</dd>
+              </div>
+              <div class="stats-metric">
+                <dt>Captures against</dt>
+                <dd data-stat="captures-against">0</dd>
+              </div>
+              <div class="stats-metric">
+                <dt>Average moves per game</dt>
+                <dd data-stat="average-moves">0.0</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+
+        <div class="stats-actions">
+          <button type="button" id="btn-reset-stats" class="btn btn--danger" disabled>Reset Statistics</button>
+          <button type="button" id="btn-stats-back" class="btn btn--ghost">Back to Menu</button>
+        </div>
+        <p class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
       </div>
     </section>
 
@@ -59,55 +371,112 @@
       <div class="game-layout">
         <div class="board-area">
           <div class="board-shell">
-            <div class="coords coords--files" aria-hidden="true">
-              <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+            <div id="game-files" class="coords coords--files" aria-hidden="true">
+              <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span>
             </div>
-            <div class="coords coords--ranks" aria-hidden="true">
+            <div id="game-ranks" class="coords coords--ranks" aria-hidden="true">
               <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
             </div>
-            <div id="board" class="board" role="group" aria-label="Dama board. Blue starts at the top, Red starts at the bottom."></div>
+            <div id="board" class="board" role="group" aria-label="Dama board"></div>
           </div>
         </div>
 
         <aside class="side-panel" aria-label="Game status and controls">
+          <div id="match-strip" class="match-strip" aria-label="Series score" hidden>
+            <p class="match-strip__line">
+              <span id="match-game-label" class="match-strip__game">Game 1</span>
+              <span id="match-start-label" class="match-strip__start">Red starts</span>
+            </p>
+            <p id="match-series-label" class="match-strip__score">Red 0 – 0 Blue</p>
+          </div>
           <p class="turn-pill" id="turn-indicator">
             <span class="turn-dot" id="turn-dot" aria-hidden="true"></span>
-            <span id="turn-text">Turn: Red</span>
+            <span id="turn-text">Player 1 to move</span>
           </p>
           <p id="status-text" class="status" role="status" aria-live="polite">Red moves first.</p>
 
           <div class="players">
             <article class="player-card player-card--red is-active" id="player-red">
-              <h3 class="player-name"><span class="chip" aria-hidden="true"></span>Red</h3>
+              <label class="player-label" for="name-red">
+                <span class="chip" aria-hidden="true"></span>
+                <span class="player-role" id="red-role">Red player</span>
+              </label>
+              <input id="name-red" class="name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" value="Player 1" placeholder="Player 1">
               <dl class="player-stats">
                 <div class="stat">
-                  <dt>Pieces left</dt>
+                  <dt>Pieces</dt>
                   <dd id="red-remaining">12</dd>
                 </div>
                 <div class="stat">
                   <dt>Captured</dt>
                   <dd id="red-captured">0</dd>
                 </div>
+                <div class="stat">
+                  <dt>Wins</dt>
+                  <dd id="red-wins">0</dd>
+                </div>
               </dl>
             </article>
 
             <article class="player-card player-card--blue" id="player-blue">
-              <h3 class="player-name"><span class="chip" aria-hidden="true"></span>Blue</h3>
+              <label class="player-label" for="name-blue">
+                <span class="chip" aria-hidden="true"></span>
+                <span class="player-role" id="blue-role">Blue player</span>
+              </label>
+              <input id="name-blue" class="name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" value="Player 2" placeholder="Player 2">
               <dl class="player-stats">
                 <div class="stat">
-                  <dt>Pieces left</dt>
+                  <dt>Pieces</dt>
                   <dd id="blue-remaining">12</dd>
                 </div>
                 <div class="stat">
                   <dt>Captured</dt>
                   <dd id="blue-captured">0</dd>
                 </div>
+                <div class="stat">
+                  <dt>Wins</dt>
+                  <dd id="blue-wins">0</dd>
+                </div>
               </dl>
             </article>
           </div>
 
+          <div class="score-actions">
+            <button type="button" id="btn-game-stats" class="link-button">Statistics</button>
+            <button type="button" id="btn-reset-scores" class="link-button">Reset scores</button>
+          </div>
+
+          <section class="history" aria-labelledby="history-heading">
+            <h3 id="history-heading" class="panel-title">Move history</h3>
+            <p id="history-empty" class="history-empty">No moves yet. Red opens the game.</p>
+            <ol id="move-history" class="move-list" tabindex="0" aria-label="Completed moves"></ol>
+          </section>
+
+          <div class="settings">
+            <div class="field">
+              <label class="field-label" for="theme-select">Theme</label>
+              <select id="theme-select" class="select">
+                <option value="wood">Classic Wood</option>
+                <option value="night">Night Mode</option>
+                <option value="light">Clean Light</option>
+              </select>
+            </div>
+            <button type="button" id="btn-sound" class="btn btn--ghost sound-toggle" aria-pressed="false" aria-label="Enable sound effects">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z" fill="currentColor"></path>
+                <g class="sound-waves" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                  <path d="M15.5 9a4.2 4.2 0 0 1 0 6"></path>
+                  <path d="M18 6.5a7.5 7.5 0 0 1 0 11"></path>
+                </g>
+                <path class="sound-slash" d="M15 9l6 6M21 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+              <span id="sound-label">Sound off</span>
+            </button>
+          </div>
+
           <div class="side-actions">
-            <button type="button" id="btn-restart" class="btn btn--ghost">Restart</button>
+            <button type="button" id="btn-undo" class="btn btn--ghost" disabled>Undo</button>
+            <button type="button" id="btn-restart" class="btn btn--ghost">New Game</button>
             <button type="button" id="btn-menu" class="btn btn--ghost">Main Menu</button>
           </div>
         </aside>
@@ -116,21 +485,86 @@
 
     <section id="screen-end" class="screen screen--end" aria-labelledby="end-title" hidden>
       <div class="end-card" id="end-card">
-        <p class="eyebrow">Game over</p>
-        <h2 id="end-title" tabindex="-1">Red Wins!</h2>
+        <p class="eyebrow" id="end-eyebrow">Game over</p>
+        <h2 id="end-title" tabindex="-1">Game over</h2>
+        <p id="end-meta" class="end-meta"></p>
         <p id="end-detail" class="end-detail"></p>
+        <p id="end-series" class="end-series" hidden></p>
+        <p id="end-score" class="end-score"></p>
         <div class="button-row">
           <button type="button" id="btn-again" class="btn btn--primary">Play Again</button>
+          <button type="button" id="btn-next-game" class="btn btn--primary" hidden>Next Game</button>
+          <button type="button" id="btn-new-match" class="btn btn--primary" hidden>New Match</button>
+          <button type="button" id="btn-view-replay" class="btn btn--ghost" hidden>View Replay</button>
+          <button type="button" id="btn-export-end" class="btn btn--ghost" hidden>Export Replay</button>
           <button type="button" id="btn-end-menu" class="btn btn--ghost">Main Menu</button>
         </div>
       </div>
     </section>
 
+    <section id="screen-replay" class="screen screen--game screen--replay" aria-labelledby="replay-heading" hidden>
+      <div class="game-layout replay-layout">
+        <div class="board-area">
+          <div class="board-shell">
+            <div id="replay-files" class="coords coords--files" aria-hidden="true">
+              <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span>
+            </div>
+            <div id="replay-ranks" class="coords coords--ranks" aria-hidden="true">
+              <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div id="replay-board" class="board replay-board" role="grid" aria-label="Read-only replay board" aria-readonly="true"></div>
+          </div>
+        </div>
+
+        <aside class="side-panel replay-panel" aria-label="Replay controls">
+          <p class="eyebrow">Game replay</p>
+          <h2 id="replay-heading" tabindex="-1">Replay</h2>
+          <p id="replay-meta" class="replay-meta"></p>
+          <p id="replay-result" class="replay-result"></p>
+          <p id="replay-export-date" class="replay-export-date" hidden></p>
+          <div class="replay-progress">
+            <span id="replay-counter" class="replay-counter">Move 0 / 0</span>
+          </div>
+          <p id="replay-description" class="replay-description" aria-live="polite">Starting position.</p>
+          <div class="replay-actions">
+            <button type="button" id="btn-replay-play" class="btn btn--primary" aria-pressed="false">Play</button>
+            <button type="button" id="btn-replay-prev" class="btn btn--ghost" disabled>Previous</button>
+            <button type="button" id="btn-replay-next" class="btn btn--ghost">Next</button>
+            <button type="button" id="btn-replay-restart" class="btn btn--ghost">Restart</button>
+            <button type="button" id="btn-import-viewer" class="btn btn--ghost">Import Replay</button>
+            <button type="button" id="btn-export-viewer" class="btn btn--ghost">Export Replay</button>
+            <button type="button" id="btn-replay-exit" class="btn btn--ghost">Exit Replay</button>
+          </div>
+          <p class="replay-hint">Arrow keys step, Space plays or pauses, Escape exits.</p>
+        </aside>
+      </div>
+    </section>
+
+    <label for="replay-file-input" class="visually-hidden">Choose a Dama Pinoy replay JSON file</label>
+    <input id="replay-file-input" type="file" accept=".json,application/json" hidden>
+    <p id="announcer" class="visually-hidden" aria-live="polite"></p>
+
   </main>
+
+  <p id="replay-transfer-status" class="replay-transfer-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+
+  <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="dialog-card">
+      <h2 id="confirm-title" class="dialog-title">Confirm</h2>
+      <p id="confirm-message" class="dialog-message"></p>
+      <div class="button-row dialog-actions">
+        <button type="button" id="confirm-cancel" class="btn btn--ghost">Cancel</button>
+        <button type="button" id="confirm-ok" class="btn btn--primary">Confirm</button>
+      </div>
+    </div>
+  </dialog>
 
   <noscript>
     <p class="noscript">Dama Pinoy needs JavaScript enabled to run.</p>
   </noscript>
   <script src="script.js" defer></script>
+  <script src="online-rules.js" defer></script>
+  <script src="online-config.js" defer></script>
+  <script src="online.js" defer></script>
 </body>
 </html>
