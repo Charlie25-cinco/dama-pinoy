@@ -134,18 +134,63 @@
       <div class="online-panel">
         <p class="eyebrow">Play across devices</p>
         <h2 id="online-heading" tabindex="-1">Online Multiplayer</h2>
-        <p class="online-intro">Single Game with a friend. Share a room code to play live; Red always opens.</p>
+        <p class="online-intro">Choose a color and match format, then share a room code. Red opens every game.</p>
         <p id="online-status" class="online-status" role="status" aria-live="polite">Enter a guest name to get started.</p>
 
         <div id="online-entry" class="online-entry">
-          <label class="field-label" for="online-name">Guest name</label>
-          <input id="online-name" class="name-input online-input" type="text" maxlength="20" autocomplete="nickname" placeholder="Your name" required>
-          <button type="button" id="btn-create-room" class="btn btn--primary">Create Room</button>
-          <div class="online-divider" aria-hidden="true">or join a friend</div>
-          <label class="field-label" for="online-code">Six-character room code</label>
-          <input id="online-code" class="name-input online-input online-code-input" type="text" maxlength="6" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7Q2XN" aria-describedby="online-code-hint">
-          <p id="online-code-hint" class="online-hint">Letters and numbers, without 0, O, 1, I, or L.</p>
-          <button type="button" id="btn-join-room" class="btn btn--ghost">Join Room</button>
+          <div class="online-entry__identity">
+            <label class="field-label" for="online-name">Guest name</label>
+            <input id="online-name" class="name-input online-input" type="text" maxlength="20" autocomplete="nickname" placeholder="Your name" required>
+            <p class="online-hint">Shown to your opponent in this room only.</p>
+          </div>
+          <div class="online-entry__panels">
+            <section class="online-entry__panel online-entry__panel--create" aria-labelledby="online-create-heading">
+              <h3 id="online-create-heading" class="online-entry__title">Create a room</h3>
+              <fieldset class="online-options">
+                <legend class="online-options__legend">Your Game 1 color</legend>
+                <div class="online-choice-row">
+                  <label class="online-choice">
+                    <input type="radio" name="online-color" value="R" checked>
+                    <span>Red</span>
+                  </label>
+                  <label class="online-choice">
+                    <input type="radio" name="online-color" value="B">
+                    <span>Blue</span>
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset class="online-options">
+                <legend class="online-options__legend">Match format</legend>
+                <div class="online-choice-grid">
+                  <label class="online-choice">
+                    <input type="radio" name="online-format" value="single" checked>
+                    <span>Single</span><small>1 game</small>
+                  </label>
+                  <label class="online-choice">
+                    <input type="radio" name="online-format" value="bestOfThree">
+                    <span>Best of 3</span><small>First to 2</small>
+                  </label>
+                  <label class="online-choice">
+                    <input type="radio" name="online-format" value="bestOfFive">
+                    <span>Best of 5</span><small>First to 3</small>
+                  </label>
+                  <label class="online-choice">
+                    <input type="radio" name="online-format" value="bestOfNine">
+                    <span>Best of 9</span><small>First to 5</small>
+                  </label>
+                </div>
+              </fieldset>
+              <p class="online-hint">Red opens Game 1. Players swap colors each game; drawn games count toward the limit.</p>
+              <button type="button" id="btn-create-room" class="btn btn--primary">Create Room</button>
+            </section>
+            <section class="online-entry__panel online-entry__panel--join" aria-labelledby="online-join-heading">
+              <h3 id="online-join-heading" class="online-entry__title">Join a room</h3>
+              <label class="field-label" for="online-code">Six-character room code</label>
+              <input id="online-code" class="name-input online-input online-code-input" type="text" maxlength="6" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7Q2XN" aria-describedby="online-code-hint">
+              <p id="online-code-hint" class="online-hint">Letters and numbers, without 0, O, 1, I, or L.</p>
+              <button type="button" id="btn-join-room" class="btn btn--ghost">Join Room</button>
+            </section>
+          </div>
           <button type="button" id="btn-online-back" class="btn btn--ghost">Back to Menu</button>
         </div>
 
@@ -154,6 +199,7 @@
           <strong id="online-room-code" class="online-room-code">------</strong>
           <button type="button" id="btn-copy-room" class="btn btn--ghost">Copy Room Code</button>
           <p id="online-waiting-players" class="online-players">Waiting for opponent…</p>
+          <p id="online-waiting-options" class="online-waiting-options"></p>
           <p class="online-hint">Keep this page open. The game starts when a second player joins.</p>
           <button type="button" id="btn-online-wait-leave" class="btn btn--ghost">Leave Room</button>
         </div>
@@ -171,7 +217,12 @@
             <p id="online-connection" class="online-connection" role="status">Connecting…</p>
             <h3 id="online-turn" class="online-turn">Waiting for players</h3>
             <p id="online-game-players" class="online-players"></p>
+            <div id="online-series" class="online-series" hidden>
+              <p id="online-series-format" class="online-series__format"></p>
+              <p id="online-series-score" class="online-series__score"></p>
+            </div>
             <p id="online-result" class="online-result" hidden></p>
+            <p id="online-match-result" class="online-match-result" hidden></p>
             <section class="history" aria-labelledby="online-history-heading">
               <h4 id="online-history-heading" class="panel-title">Move history</h4>
               <ol id="online-history" class="move-list" tabindex="0" aria-label="Online moves"></ol>
@@ -199,7 +250,7 @@
         <p class="mode-note"><strong>Playing vs Computer?</strong> Choose Red to move first in Game 1, or Blue to let the computer open as Red. In a series match, you and the computer swap colors after each game. The computer follows the same Dama rules and keeps your chosen Easy, Medium, or Hard difficulty for the whole match.</p>
         <p class="mode-note"><strong>Statistics:</strong> Completed games and matches are saved on this device. Local two-player results are recorded from Player 1's perspective; vs Computer results are from your perspective. Reset Statistics clears only the statistics record.</p>
         <p class="mode-note"><strong>Replay files:</strong> Export a completed replay from Game Over or the replay viewer. Import a Dama Pinoy replay JSON file from the menu or viewer to watch it without replacing the saved Last Replay.</p>
-        <p class="mode-note"><strong>Online Multiplayer:</strong> Two guests can play a Single Game with a six-character room code. An internet connection is required; local play still works offline. Red opens each game, and both players can request a rematch after it ends.</p>
+        <p class="mode-note"><strong>Online Multiplayer:</strong> Two guests can play a six-character room code. The host chooses a Game 1 color and a Single Game or Best of 3, 5, or 9 series; the guest joins those settings. Red opens every game, players swap colors each game, and drawn games count toward the limit. Both players confirm each next game or a new series. An internet connection is required; local play still works offline.</p>
         <div class="button-row button-row--start">
           <button type="button" id="btn-howto-back" class="btn btn--ghost">Back</button>
         </div>

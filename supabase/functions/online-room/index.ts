@@ -1,4 +1,4 @@
-// Dama Pinoy v2.0. Deploy with JWT verification enabled. Never bundle this
+// Dama Pinoy v2.1. Deploy with JWT verification enabled. Never bundle this
 // function or its service-role environment variable into the frontend.
 import "../../../online-rules.js";
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
@@ -38,6 +38,16 @@ function requireRoomId(value) {
   return value;
 }
 
+function roomOptions(body) {
+  const color = body.color === undefined ? "R" : body.color;
+  const format = body.format === undefined ? "single" : body.format;
+  if ((color !== "R" && color !== "B") ||
+      typeof format !== "string" || !rules.MATCH_GAME_LIMITS[format]) {
+    throw new Error("Invalid room options.");
+  }
+  return { color, format };
+}
+
 async function snapshot(db, roomId, userId, attempt = 0) {
   const { data: room, error } = await db.from("rooms").select("*").eq("id", roomId).single();
   if (error || !room || (room.host_user_id !== userId && room.guest_user_id !== userId)) {
@@ -47,7 +57,9 @@ async function snapshot(db, roomId, userId, attempt = 0) {
   let moves = [];
   if (room.guest_user_id) {
     const loaded = await db.from("games").select("*")
-      .eq("room_id", room.id).eq("game_number", room.current_game_number).single();
+      .eq("room_id", room.id)
+      .eq("series_number", room.current_series_number)
+      .eq("game_number", room.current_game_number).single();
     if (loaded.error || !loaded.data) throw new Error("Room unavailable.");
     game = loaded.data;
     const history = await db.from("moves").select("*")
@@ -70,12 +82,18 @@ async function snapshot(db, roomId, userId, attempt = 0) {
       hostName: room.host_name, guestName: room.guest_name,
       hostColor: room.host_color, guestColor: room.guest_color,
       turn: room.current_turn, version: room.version,
+      seriesFormat: room.series_format,
+      seriesNumber: room.current_series_number,
       gameNumber: room.current_game_number,
+      hostScore: room.host_score, guestScore: room.guest_score,
+      draws: room.draws, matchWinnerId: room.match_winner_user_id,
       rematchHost: room.rematch_host, rematchGuest: room.rematch_guest,
       hostSeenAt: room.host_seen_at, guestSeenAt: room.guest_seen_at,
     },
     game: game && {
       id: game.id, board: game.board, status: game.status,
+      seriesNumber: game.series_number, gameNumber: game.game_number,
+      hostColor: game.host_color, guestColor: game.guest_color,
       quietPlies: game.quiet_plies, moveCount: game.move_count,
       winner: game.winner_color, reason: game.result_reason,
     },
@@ -126,6 +144,7 @@ Deno.serve(async (request) => {
     switch (body.action) {
       case "create": {
         const name = guestName(body.name);
+        const options = roomOptions(body);
         const recent = await db.from("rooms").select("id", { count: "exact", head: true })
           .eq("host_user_id", userId)
           .gte("created_at", new Date(Date.now() - 3600000).toISOString());
@@ -136,6 +155,7 @@ Deno.serve(async (request) => {
           const code = roomCode();
           const created = await db.rpc("online_create_room", {
             p_code: code, p_name: name, p_user: userId,
+            p_color: options.color, p_format: options.format,
           });
           if (!created.error) return reply({ state: await snapshot(db, created.data, userId) });
           if (created.error.code !== "23505") {
@@ -168,8 +188,9 @@ Deno.serve(async (request) => {
         const current = await snapshot(db, id, userId);
         const room = current.room;
         const game = current.game;
-        const owner = room.hostId === userId ? room.hostColor : room.guestColor;
-        if (room.status !== "active" || !game || game.id !== body.gameId ||
+        const owner = game && (room.hostId === userId ? game.hostColor : game.guestColor);
+        if (room.status !== "active" || !game || game.status !== "active" ||
+            game.id !== body.gameId ||
             !Number.isInteger(body.moveNumber) || body.moveNumber !== game.moveCount + 1 ||
             owner !== room.turn || !rules.validBoard(game.board)) {
           return reply({ error: "Turn or room changed. Synchronizing…" }, 409);

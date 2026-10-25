@@ -3,6 +3,12 @@
 
   const rules = globalThis.DamaOnlineRules;
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const FORMAT_LABELS = {
+    single: "Single Game",
+    bestOfThree: "Best of 3",
+    bestOfFive: "Best of 5",
+    bestOfNine: "Best of 9",
+  };
   const storage = { name: "damaPinoy.onlineName", room: "damaPinoy.onlineRoom",
     guest: "damaPinoy.onlineGuestId" };
   const squares = Array.from({ length: 8 }, () => []);
@@ -16,7 +22,11 @@
   let state = null;
   let selection = null;
   let busy = false;
-  let synced = null;
+  let syncing = null;
+  let syncAgain = false;
+  let pendingMove = false;
+  let pendingPrevious = null;
+  let animatedMoveKey = null;
   let connected = false;
   let opponentPresent = false;
   let currentEpoch = 0;
@@ -37,9 +47,27 @@
   }
   function isOnline() { return navigator.onLine !== false; }
   function config() { return globalThis.DAMA_ONLINE_CONFIG || {}; }
+  function opposite(color) { return color === "R" ? "B" : "R"; }
+  function isColor(color) { return color === "R" || color === "B"; }
+  function formatLimit(format) { return rules.MATCH_GAME_LIMITS[format] || 0; }
+  function currentColors() {
+    if (!state) return null;
+    return state.game
+      ? { host: state.game.hostColor, guest: state.game.guestColor }
+      : { host: state.room.hostColor, guest: state.room.guestColor };
+  }
   function localColor() {
     if (!state) return null;
-    return state.room.hostId === userId ? state.room.hostColor : state.room.guestColor;
+    const colors = currentColors();
+    return state.room.hostId === userId ? colors.host : colors.guest;
+  }
+  function colorName(color) { return color === "R" ? "Red" : "Blue"; }
+  function formatLabel(room) { return FORMAT_LABELS[room.seriesFormat] || "Match"; }
+  function nextActionLabel(room) {
+    if (room.status === "finished") {
+      return room.seriesFormat === "single" ? "Rematch" : "New Series";
+    }
+    return "Next Game";
   }
   function opponentName() {
     if (!state) return "Opponent";
@@ -105,14 +133,24 @@
     const session = (await service.auth.getSession()).data.session;
     if (!session?.access_token) throw new Error("Guest session expired. Try again.");
     const settings = config();
-    const response = await fetch(settings.supabaseUrl.replace(/\/$/, "") +
-      "/functions/v1/online-room", {
-      method: "POST",
-      headers: { "Content-Type": "application/json",
-        apikey: settings.publishableKey,
-        Authorization: "Bearer " + session.access_token },
-      body: JSON.stringify({ action, ...details }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    let response;
+    try {
+      response = await fetch(settings.supabaseUrl.replace(/\/$/, "") +
+        "/functions/v1/online-room", {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json",
+          apikey: settings.publishableKey,
+          Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify({ action, ...details }),
+      });
+    } catch (error) {
+      throw new Error("Online service timed out. Check your connection and try again.");
+    } finally {
+      clearTimeout(timeout);
+    }
     let result;
     try { result = await response.json(); } catch (error) {
       throw new Error("Online service is unavailable. Try again.");
@@ -127,24 +165,65 @@
   // Broadcast messages are hints only; every state is fetched from PostgreSQL.
   // Verify every move again with the same Dama rules before displaying it.
   function verifyState(next) {
-    if (!next?.room || !Array.isArray(next.moves) ||
-        (next.room.hostId !== userId && next.room.guestId !== userId) ||
-        !["waiting", "active", "finished", "closed"].includes(next.room.status) ||
-        !new RegExp("^[" + alphabet + "]{6}$").test(next.room.code) ||
-        !["R", "B"].includes(next.room.hostColor) ||
-        next.room.guestColor !== (next.room.hostColor === "R" ? "B" : "R")) {
+    const room = next?.room;
+    if (!room || !Array.isArray(next.moves) ||
+        (room.hostId !== userId && room.guestId !== userId) ||
+        !["waiting", "active", "finished", "closed"].includes(room.status) ||
+        !new RegExp("^[" + alphabet + "]{6}$").test(room.code) ||
+        !isColor(room.hostColor) || room.guestColor !== opposite(room.hostColor) ||
+        !Object.prototype.hasOwnProperty.call(rules.MATCH_GAME_LIMITS, room.seriesFormat) ||
+        !Number.isInteger(room.seriesNumber) || room.seriesNumber < 1 ||
+        !Number.isInteger(room.gameNumber) || room.gameNumber < 1 ||
+        !Number.isInteger(room.hostScore) || room.hostScore < 0 ||
+        !Number.isInteger(room.guestScore) || room.guestScore < 0 ||
+        !Number.isInteger(room.draws) || room.draws < 0 ||
+        !isColor(room.turn) ||
+        !(room.matchWinnerId === null || room.matchWinnerId === room.hostId ||
+          room.matchWinnerId === room.guestId)) {
       throw new Error("Synchronization warning. Room state is invalid.");
     }
+    const limit = formatLimit(room.seriesFormat);
+    const total = room.hostScore + room.guestScore + room.draws;
+    if (room.gameNumber > limit || room.hostScore > limit ||
+        room.guestScore > limit || room.draws > limit || total > limit ||
+        (room.status === "active" && room.matchWinnerId !== null)) {
+      throw new Error("Synchronization warning. Series state is invalid.");
+    }
     if (!next.game) {
-      if (next.moves.length || next.room.status === "active") {
+      if (next.moves.length || (room.status !== "waiting" && room.status !== "closed") ||
+          room.gameNumber !== 1 || total !== 0) {
         throw new Error("Synchronization warning. Room state is invalid.");
       }
       return;
     }
-    if (!rules.validBoard(next.game.board) ||
-        next.game.moveCount !== next.moves.length ||
-        (next.room.status !== "closed" && next.room.status !== next.game.status)) {
+    const game = next.game;
+    if (!rules.validBoard(game.board) ||
+        !Number.isInteger(game.moveCount) || game.moveCount !== next.moves.length ||
+        !Number.isInteger(game.seriesNumber) || game.seriesNumber !== room.seriesNumber ||
+        !Number.isInteger(game.gameNumber) || game.gameNumber !== room.gameNumber ||
+        !isColor(game.hostColor) || game.guestColor !== opposite(game.hostColor) ||
+        !["active", "finished"].includes(game.status) || room.status === "waiting") {
       throw new Error("Synchronization warning. Board state is invalid.");
+    }
+    const expectedHost = game.gameNumber % 2 === 1 ? room.hostColor : room.guestColor;
+    if (game.hostColor !== expectedHost ||
+        (room.status === "finished" && game.status !== "finished") ||
+        (game.status === "finished" && total !== room.gameNumber) ||
+        (game.status === "active" && total !== room.gameNumber - 1)) {
+      throw new Error("Synchronization warning. Game state is invalid.");
+    }
+    const majority = Math.floor(limit / 2) + 1;
+    if (room.status === "active" && game.status === "finished" &&
+        (room.hostScore >= majority || room.guestScore >= majority || total >= limit)) {
+      throw new Error("Synchronization warning. Match state is invalid.");
+    }
+    if (room.status === "finished") {
+      const expectedWinner = room.hostScore > room.guestScore ? room.hostId :
+        room.guestScore > room.hostScore ? room.guestId : null;
+      if ((total < limit && room.hostScore < majority && room.guestScore < majority) ||
+          room.matchWinnerId !== expectedWinner) {
+        throw new Error("Synchronization warning. Match state is invalid.");
+      }
     }
     let board = rules.initialBoard();
     let turn = "R";
@@ -164,10 +243,11 @@
       turn = applied.nextTurn;
       result = applied.result;
     }
-    if (!sameBoard(board, next.game.board) || quiet !== next.game.quietPlies ||
-        turn !== next.room.turn ||
-        (next.game.status === "finished") !== Boolean(result) ||
-        (result && next.game.winner !== result.winner)) {
+    if (!sameBoard(board, game.board) || quiet !== game.quietPlies ||
+        turn !== room.turn ||
+        (game.status === "finished") !== Boolean(result) ||
+        (result ? game.winner !== result.winner || game.reason !== result.reason
+          : game.winner !== null)) {
       throw new Error("Synchronization warning. Board state is invalid.");
     }
   }
@@ -186,9 +266,36 @@
     } else if (waiting) {
       setStatus("Waiting for opponent…");
     } else if (playing) {
-      setStatus(state.game.status === "finished" ? "Game complete. Request a rematch to play again." :
-        state.room.turn === localColor() ? "Your turn." : "Opponent’s turn.");
+      if (state.game.status === "finished") {
+        if (room.status === "finished") {
+          setStatus(room.seriesFormat === "single"
+            ? "Game complete. Request a rematch to play again."
+            : "Match complete. Request a new series to play again.");
+        } else {
+          setStatus("Game complete. Request the next game to continue the series.");
+        }
+      } else {
+        setStatus(room.turn === localColor() ? "Your turn." : "Opponent’s turn.");
+      }
     }
+  }
+
+  function animateLastMove(move) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const from = squares[move.from.row]?.[move.from.col];
+    const to = squares[move.to.row]?.[move.to.col];
+    const piece = to?.querySelector(".piece");
+    if (!from || !to || !piece) return;
+    const start = from.getBoundingClientRect();
+    const end = to.getBoundingClientRect();
+    piece.style.setProperty("--arrive-x", (start.left - end.left) + "px");
+    piece.style.setProperty("--arrive-y", (start.top - end.top) + "px");
+    piece.classList.add("piece--arrive");
+    piece.addEventListener("animationend", function () {
+      piece.classList.remove("piece--arrive");
+      piece.style.removeProperty("--arrive-x");
+      piece.style.removeProperty("--arrive-y");
+    }, { once: true });
   }
 
   function renderBoard() {
@@ -204,24 +311,35 @@
       ui.ranks.children[index].textContent = String(flipped ? index + 1 : 8 - index);
     }
     const position = selection?.preview || state.game.board;
-    const legal = !busy && state.room.status === "active" &&
-      state.room.turn === own ? rules.legalMoves(state.game.board, own) : [];
+    const canPlay = !busy && state.room.status === "active" &&
+      state.game.status === "active" && state.room.turn === own;
+    const legal = canPlay ? rules.legalMoves(state.game.board, own) : [];
     const choices = selection ? selection.candidates : [];
     const stepIndex = selection ? selection.path.length : 0;
     const available = choices.map((move) => move.path[stepIndex]);
+    const last = state.moves[state.moves.length - 1];
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
         const square = squares[row][col];
         const piece = position[row][col];
         const dark = (row + col) % 2 === 1;
+        const squareAt = { row, col };
         square.style.order = flipped ? String(63 - row * 8 - col) : "";
         square.className = "square " + (dark ? "dark" : "light");
-        if (selection && same(selection.position, { row, col })) square.classList.add("is-selected");
-        if (available.some((target) => same(target, { row, col }))) {
+        if (selection && same(selection.position, squareAt)) square.classList.add("is-selected");
+        if (available.some((target) => same(target, squareAt))) {
           square.classList.add(choices[0]?.captures.length ? "is-capture" : "is-move");
         }
-        if (!selection && legal.some((move) => same(move.from, { row, col })) &&
+        if (!selection && legal.some((move) => same(move.from, squareAt)) &&
             legal[0]?.captures.length) square.classList.add("is-mandatory");
+        if (last && same(last.from, squareAt)) square.classList.add("is-last-from");
+        if (last && same(last.to, squareAt)) {
+          square.classList.add("is-last");
+          if (last.promoted) square.classList.add("is-promoting");
+        }
+        if (last && last.captures.some((target) => same(target, squareAt))) {
+          square.classList.add("is-capture-flash");
+        }
         square.replaceChildren();
         if (piece) {
           const disc = document.createElement("span");
@@ -241,8 +359,15 @@
           (piece ? ", " + (piece[0] === "R" ? "Red" : "Blue") +
             (piece.length === 2 ? " Dama" : " piece") : ", empty") +
           (!dark ? ", unplayable" : ""));
-        square.setAttribute("aria-disabled", state.room.turn !== own || busy ? "true" : "false");
+        square.setAttribute("aria-disabled", canPlay ? "false" : "true");
         square.tabIndex = focused.row === row && focused.col === col ? 0 : -1;
+      }
+    }
+    if (last) {
+      const key = state.game.id + ":" + last.number;
+      if (key !== animatedMoveKey) {
+        animatedMoveKey = key;
+        animateLastMove(last);
       }
     }
   }
@@ -251,27 +376,46 @@
     setScreen();
     if (!state) return;
     const room = state.room;
+    const hostColor = colorName(room.hostColor);
+    const guestColor = colorName(room.guestColor);
     ui.roomCode.textContent = room.code;
     ui.gameCode.textContent = room.code;
     ui.waitingPlayers.textContent = room.guestName ?
-      room.hostName + " (Red) vs " + room.guestName + " (Blue)" :
+      room.hostName + " (" + hostColor + ") vs " + room.guestName + " (" + guestColor + ")" :
       room.hostName + " is waiting for an opponent…";
+    ui.waitingOptions.textContent = formatLabel(room) + " · " +
+      room.hostName + " plays " + hostColor + " in Game 1 · Red opens";
     if (!state.game) return;
     const own = localColor();
-    ui.gamePlayers.textContent = localName() + " (" + (own === "R" ? "Red" : "Blue") +
-      ") vs " + opponentName() + " (" + (own === "R" ? "Blue" : "Red") + ")";
+    const opponent = opposite(own);
+    ui.gamePlayers.textContent = localName() + " (" + colorName(own) +
+      ") vs " + opponentName() + " (" + colorName(opponent) + ")";
     const finished = state.game.status === "finished";
-    ui.turn.textContent = finished ? "Game over" :
+    const matchOver = room.status === "finished";
+    ui.turn.textContent = finished ? (matchOver ? "Match over" : "Game over") :
       room.turn === own ? "Your turn" : "Opponent’s turn";
+    ui.series.hidden = false;
+    ui.seriesFormat.textContent = formatLabel(room) + " · Game " + room.gameNumber +
+      " of " + formatLimit(room.seriesFormat);
+    ui.seriesScore.textContent = room.hostName + " " + room.hostScore + " – " +
+      room.guestScore + " " + room.guestName +
+      (room.draws ? " · " + room.draws + (room.draws === 1 ? " draw" : " draws") : "");
     ui.result.hidden = !finished;
     if (finished) {
       ui.result.textContent = state.game.winner === null ? "Game drawn." :
-        state.game.winner === own ? "You win!" : opponentName() + " wins!";
+        state.game.winner === own ? "You win this game!" : opponentName() + " wins this game!";
+    }
+    ui.matchResult.hidden = !(finished && matchOver);
+    if (finished && matchOver) {
+      ui.matchResult.textContent = room.matchWinnerId === null ? "Match drawn." :
+        room.matchWinnerId === userId ? "You win the match!" :
+          opponentName() + " wins the match!";
     }
     const requested = room.hostId === userId ? room.rematchHost : room.rematchGuest;
-    ui.rematch.hidden = !finished;
+    ui.rematch.hidden = !finished || room.status === "closed";
     ui.rematch.disabled = requested || busy;
-    ui.rematch.textContent = requested ? "Waiting for opponent…" : "Request Rematch";
+    ui.rematch.textContent = requested ? "Waiting for opponent…" :
+      "Request " + nextActionLabel(room);
     ui.history.replaceChildren();
     const fragment = document.createDocumentFragment();
     for (const move of state.moves) {
@@ -288,10 +432,14 @@
     renderBoard();
   }
 
-  async function applyState(next) {
+  async function applyState(next, force = false) {
+    if (pendingMove && !force) return;
     verifyState(next);
     if (state?.room.id === next.room.id &&
         next.room.version < state.room.version) return;
+    if (state?.room.id !== next.room.id || state?.game?.id !== next.game?.id) {
+      animatedMoveKey = null;
+    }
     if (state?.game?.id !== next.game?.id ||
         state?.game?.moveCount !== next.game?.moveCount) clearSelection();
     state = next;
@@ -306,12 +454,23 @@
   }
 
   async function synchronize() {
-    if (!state || synced || !isOnline()) return synced;
+    if (!state || !isOnline() || pendingMove) return;
+    if (syncing) {
+      syncAgain = true;
+      return syncing;
+    }
     const id = state.room.id;
-    synced = request("state", { roomId: id }).then(applyState).catch(function (error) {
-      setStatus(error.message || "Synchronization warning. Retrying…", true);
-    }).finally(function () { synced = null; });
-    return synced;
+    syncing = (async function () {
+      do {
+        syncAgain = false;
+        try {
+          await applyState(await request("state", { roomId: id }));
+        } catch (error) {
+          setStatus(error.message || "Synchronization warning. Retrying…", true);
+        }
+      } while (syncAgain && state?.room.id === id && isOnline() && !pendingMove);
+    })().finally(function () { syncing = null; });
+    return syncing;
   }
 
   async function stopChannel() {
@@ -366,7 +525,7 @@
         synchronize();
       }
     });
-    timer = setInterval(synchronize, 15000);
+    timer = setInterval(synchronize, 5000);
   }
 
   function previewHop(target, candidate) {
@@ -383,24 +542,76 @@
       selection.path.every((step, stepIndex) => same(step, move.path[stepIndex])));
   }
 
+  function applyOptimisticMove(applied) {
+    const room = state.room;
+    let hostScore = room.hostScore;
+    let guestScore = room.guestScore;
+    let draws = room.draws;
+    let status = "active";
+    let matchWinnerId = null;
+    if (applied.result) {
+      hostScore += applied.result.winner === state.game.hostColor ? 1 : 0;
+      guestScore += applied.result.winner === state.game.guestColor ? 1 : 0;
+      draws += applied.result.winner === null ? 1 : 0;
+      const limit = formatLimit(room.seriesFormat);
+      const majority = Math.floor(limit / 2) + 1;
+      if (hostScore >= majority || guestScore >= majority ||
+          hostScore + guestScore + draws >= limit) {
+        status = "finished";
+        matchWinnerId = hostScore > guestScore ? room.hostId :
+          guestScore > hostScore ? room.guestId : null;
+      }
+    }
+    state = {
+      ...state,
+      room: { ...room, turn: applied.nextTurn, hostScore, guestScore, draws,
+        status, matchWinnerId },
+      game: { ...state.game, board: applied.board, quietPlies: applied.quietPlies,
+        moveCount: state.game.moveCount + 1,
+        status: applied.result ? "finished" : "active",
+        winner: applied.result ? applied.result.winner : null,
+        reason: applied.result ? applied.result.reason : null },
+      moves: state.moves.concat({ ...applied.move, number: state.game.moveCount + 1 }),
+    };
+  }
+
   async function submitMove(move) {
-    if (busy || !state?.game) return;
+    if (busy || !state?.game || state.room.status !== "active" ||
+        state.game.status !== "active") return;
+    let applied;
+    try {
+      applied = rules.applyMove(state.game.board, localColor(), state.game.quietPlies, move);
+    } catch (error) {
+      clearSelection();
+      render();
+      return;
+    }
+    const expectedCount = state.game.moveCount;
     busy = true;
-    let rejected = false;
+    pendingPrevious = state;
+    pendingMove = true;
+    applyOptimisticMove(applied);
+    clearSelection();
     render();
+    let rejected = false;
     try {
       const next = await request("move", {
         roomId: state.room.id, gameId: state.game.id,
-        moveNumber: state.game.moveCount + 1,
+        moveNumber: expectedCount + 1,
         move: { from: move.from, path: move.path,
           captures: move.captures, promoted: move.promoted },
       });
-      clearSelection();
-      await applyState(next);
+      pendingMove = false;
+      await applyState(next, true);
+      pendingPrevious = null;
       notify(next.game.status === "finished" ? "game-ended" : "move-made");
     } catch (error) {
       rejected = true;
+      state = pendingPrevious || state;
+      pendingMove = false;
+      pendingPrevious = null;
       clearSelection();
+      render();
       await synchronize();
     } finally {
       busy = false;
@@ -412,7 +623,7 @@
   function clickSquare(row, col) {
     focused = { row, col };
     if (busy || !state?.game || state.room.status !== "active" ||
-        state.room.turn !== localColor()) return;
+        state.game.status !== "active" || state.room.turn !== localColor()) return;
     const position = { row, col };
     const moves = rules.legalMoves(state.game.board, localColor());
     if (selection) {
@@ -467,12 +678,19 @@
       ui.code.focus();
       return;
     }
+    const color = document.querySelector('input[name="online-color"]:checked')?.value || "R";
+    const format = document.querySelector('input[name="online-format"]:checked')?.value || "single";
+    if (action === "create" && (!isColor(color) || !formatLimit(format))) {
+      setStatus("Choose a valid color and match format.", true);
+      return;
+    }
     busy = true;
     ui.create.disabled = true;
     ui.join.disabled = true;
     setStatus(action === "create" ? "Creating room…" : "Joining room…");
     try {
-      const next = await request(action, { name, code });
+      const next = await request(action, action === "create"
+        ? { name, color, format } : { name, code });
       setStored(storage.name, name);
       await applyState(next);
       if (action === "join") notify("player-joined");
@@ -497,19 +715,26 @@
     clearStored(storage.room);
     state = null;
     clearSelection();
+    pendingMove = false;
+    pendingPrevious = null;
+    animatedMoveKey = null;
     busy = false;
     globalThis.DamaPinoyApp.showScreen("screen-title");
   }
 
   async function rematch() {
-    if (busy || !state || state.game?.status !== "finished") return;
+    if (busy || !state || state.game?.status !== "finished" ||
+        !["active", "finished"].includes(state.room.status)) return;
+    const label = nextActionLabel(state.room);
     busy = true;
     ui.rematch.disabled = true;
     try {
       const next = await request("rematch", { roomId: state.room.id });
       await applyState(next);
       notify(next.game.status === "active" ? "rematch-accepted" : "rematch-requested");
-      if (next.game.status !== "active") setStatus("Rematch requested. Waiting for opponent…");
+      if (next.game.status !== "active") {
+        setStatus(label + " requested. Waiting for opponent…");
+      }
     } catch (error) { setStatus(error.message || "Rematch unavailable.", true); }
     finally { busy = false; render(); }
   }
@@ -543,10 +768,15 @@
     ui.roomCode = document.getElementById("online-room-code");
     ui.gameCode = document.getElementById("online-game-code");
     ui.waitingPlayers = document.getElementById("online-waiting-players");
+    ui.waitingOptions = document.getElementById("online-waiting-options");
     ui.connection = document.getElementById("online-connection");
     ui.turn = document.getElementById("online-turn");
     ui.gamePlayers = document.getElementById("online-game-players");
+    ui.series = document.getElementById("online-series");
+    ui.seriesFormat = document.getElementById("online-series-format");
+    ui.seriesScore = document.getElementById("online-series-score");
     ui.result = document.getElementById("online-result");
+    ui.matchResult = document.getElementById("online-match-result");
     ui.rematch = document.getElementById("btn-online-rematch");
     ui.history = document.getElementById("online-history");
     ui.board = document.getElementById("online-board");
@@ -586,6 +816,10 @@
     window.addEventListener("online", function () { if (state) synchronize(); });
     window.addEventListener("offline", function () {
       if (state) ui.connection.textContent = "Offline. Waiting to reconnect…";
+    });
+    window.addEventListener("focus", function () { if (state) synchronize(); });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && state) synchronize();
     });
   }
 

@@ -2,6 +2,12 @@
   "use strict";
 
   const SIZE = 8;
+  const MATCH_GAME_LIMITS = Object.freeze({
+    single: 1,
+    bestOfThree: 3,
+    bestOfFive: 5,
+    bestOfNine: 9,
+  });
   const DIRECTIONS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
   const PIECES = [null, "R", "B", "RD", "BD"];
   const inside = (row, col) => Number.isInteger(row) && Number.isInteger(col) &&
@@ -188,7 +194,8 @@
     } };
   }
 
-  const api = Object.freeze({ initialBoard, validBoard, legalMoves, applyMove });
+  const api = Object.freeze({ initialBoard, validBoard, legalMoves, applyMove,
+    MATCH_GAME_LIMITS });
   root.DamaOnlineRules = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

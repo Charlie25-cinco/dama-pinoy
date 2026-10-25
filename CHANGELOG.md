@@ -2,6 +2,12 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.1.0 — 2026-10-25
+
+- **Added:** Online room hosts can choose their Game 1 color and Single Game, Best of 3, Best of 5, or Best of 9. Online series keep player-owned scores, swap colors each game, count draws toward the game limit, and require both players to confirm the next game or new series.
+- **Changed:** Online moves render optimistically for the moving player, resynchronize on rejection, poll and refresh more reliably, and show clearer waiting, series, game-result, match-result, and last-move feedback. Red still opens every game.
+- **Changed:** Added per-series and per-game ownership fields to the Supabase schema and kept database snapshots authoritative. Refreshed the installed app cache for the updated static assets.
+
 ## 2.0.1 — 2026-10-25
 
 - **Changed:** Added the public Supabase project URL and publishable key to the browser configuration and refreshed the installed app cache.
