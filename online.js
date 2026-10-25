@@ -31,6 +31,9 @@
   let opponentPresent = false;
   let currentEpoch = 0;
   let focused = { row: 5, col: 0 };
+  let savedCandidate = null;
+
+  function isSpectator() { return state?.role === "spectator"; }
 
   function getStored(key) {
     try { return localStorage.getItem(key); } catch (error) { return null; }
@@ -57,7 +60,7 @@
       : { host: state.room.hostColor, guest: state.room.guestColor };
   }
   function localColor() {
-    if (!state) return null;
+    if (!state || isSpectator()) return null;
     const colors = currentColors();
     return state.room.hostId === userId ? colors.host : colors.guest;
   }
@@ -128,7 +131,7 @@
     return guestPromise;
   }
 
-  async function request(action, details = {}) {
+  async function request(action, details = {}, raw = false) {
     const service = await ensureGuest();
     const session = (await service.auth.getSession()).data.session;
     if (!session?.access_token) throw new Error("Guest session expired. Try again.");
@@ -155,11 +158,11 @@
     try { result = await response.json(); } catch (error) {
       throw new Error("Online service is unavailable. Try again.");
     }
-    if (!response.ok || !result?.state) {
+    if (!response.ok || (!raw && !result?.state && !result?.left)) {
       throw new Error(typeof result?.error === "string" ? result.error :
         "Online service is unavailable. Try again.");
     }
-    return result.state;
+    return raw ? result : result.state;
   }
 
   // Broadcast messages are hints only; every state is fetched from PostgreSQL.
@@ -167,7 +170,7 @@
   function verifyState(next) {
     const room = next?.room;
     if (!room || !Array.isArray(next.moves) ||
-        (room.hostId !== userId && room.guestId !== userId) ||
+        (room.hostId !== userId && room.guestId !== userId && next.role !== "spectator") ||
         !["waiting", "active", "finished", "closed"].includes(room.status) ||
         !new RegExp("^[" + alphabet + "]{6}$").test(room.code) ||
         !isColor(room.hostColor) || room.guestColor !== opposite(room.hostColor) ||
@@ -181,6 +184,11 @@
         !(room.matchWinnerId === null || room.matchWinnerId === room.hostId ||
           room.matchWinnerId === room.guestId)) {
       throw new Error("Synchronization warning. Room state is invalid.");
+    }
+    if (next.role === "spectator" && (!Array.isArray(next.spectators) ||
+        !next.spectators.some((s) => s.id === userId) ||
+        room.hostId === userId || room.guestId === userId)) {
+      throw new Error("Synchronization warning. Spectator state is invalid.");
     }
     const limit = formatLimit(room.seriesFormat);
     const total = room.hostScore + room.guestScore + room.draws;
@@ -261,6 +269,7 @@
     ui.entry.hidden = Boolean(waiting || playing);
     ui.waiting.hidden = !waiting;
     ui.match.hidden = !playing;
+    ui.replaysPanel.hidden = Boolean(waiting || playing);
     if (room?.status === "closed") {
       setStatus("Room closed because your opponent left or disconnected. You can create or join another room.");
     } else if (waiting) {
@@ -275,7 +284,8 @@
           setStatus("Game complete. Request the next game to continue the series.");
         }
       } else {
-        setStatus(room.turn === localColor() ? "Your turn." : "Opponent’s turn.");
+        setStatus(isSpectator() ? "Spectating · " + colorName(room.turn) + " to move." :
+          room.turn === localColor() ? "Your turn." : "Opponent’s turn.");
       }
     }
   }
@@ -311,7 +321,7 @@
       ui.ranks.children[index].textContent = String(flipped ? index + 1 : 8 - index);
     }
     const position = selection?.preview || state.game.board;
-    const canPlay = !busy && state.room.status === "active" &&
+    const canPlay = !isSpectator() && !busy && state.room.status === "active" &&
       state.game.status === "active" && state.room.turn === own;
     const legal = canPlay ? rules.legalMoves(state.game.board, own) : [];
     const choices = selection ? selection.candidates : [];
@@ -390,10 +400,14 @@
     const opponent = opposite(own);
     ui.gamePlayers.textContent = localName() + " (" + colorName(own) +
       ") vs " + opponentName() + " (" + colorName(opponent) + ")";
+    ui.spectatorBadge.hidden = !isSpectator();
+    if (isSpectator()) ui.gamePlayers.textContent = room.hostName + " (" +
+      colorName(state.game.hostColor) + ") vs " + room.guestName + " (" + colorName(state.game.guestColor) + ")";
     const finished = state.game.status === "finished";
     const matchOver = room.status === "finished";
     ui.turn.textContent = finished ? (matchOver ? "Match over" : "Game over") :
       room.turn === own ? "Your turn" : "Opponent’s turn";
+    if (isSpectator() && !finished) ui.turn.textContent = colorName(room.turn) + " to move";
     ui.series.hidden = false;
     ui.seriesFormat.textContent = formatLabel(room) + " · Game " + room.gameNumber +
       " of " + formatLimit(room.seriesFormat);
@@ -404,15 +418,26 @@
     if (finished) {
       ui.result.textContent = state.game.winner === null ? "Game drawn." :
         state.game.winner === own ? "You win this game!" : opponentName() + " wins this game!";
+      if (isSpectator() && state.game.winner) ui.result.textContent =
+        (state.game.winner === state.game.hostColor ? room.hostName : room.guestName) + " wins this game!";
     }
     ui.matchResult.hidden = !(finished && matchOver);
     if (finished && matchOver) {
       ui.matchResult.textContent = room.matchWinnerId === null ? "Match drawn." :
         room.matchWinnerId === userId ? "You win the match!" :
           opponentName() + " wins the match!";
+      if (isSpectator() && room.matchWinnerId) ui.matchResult.textContent =
+        (room.matchWinnerId === room.hostId ? room.hostName : room.guestName) + " wins the match!";
     }
     const requested = room.hostId === userId ? room.rematchHost : room.rematchGuest;
-    ui.rematch.hidden = !finished || room.status === "closed";
+    ui.rematch.hidden = isSpectator() || !finished || room.status === "closed";
+    ui.replayActions.hidden = !finished || room.status === "closed";
+    ui.spectators.textContent = "Spectators (" + (state.spectators || []).length + "/5): " +
+      ((state.spectators || []).map((s) => s.name).join(", ") || "None");
+    const last = state.moves[state.moves.length - 1];
+    ui.lastMove.textContent = last ? "Last move: " + colorName(last.playerColor) + " " +
+      [last.from, ...last.path].map((s) => String.fromCharCode(97 + s.col) + (8 - s.row))
+        .join(last.captures.length ? "×" : "–") + (last.promoted ? " · promoted to Dama" : "") : "No moves yet.";
     ui.rematch.disabled = requested || busy;
     ui.rematch.textContent = requested ? "Waiting for opponent…" :
       "Request " + nextActionLabel(room);
@@ -443,11 +468,14 @@
     if (state?.game?.id !== next.game?.id ||
         state?.game?.moveCount !== next.game?.moveCount) clearSelection();
     state = next;
+    ui.rejoin.hidden = true;
+    savedCandidate = null;
     if (state.room.status === "closed") {
       clearStored(storage.room);
       await stopChannel();
     } else {
       setStored(storage.room, state.room.id);
+      setStored("damaPinoy.onlineRoomCode", state.room.code);
       if (!channel) await watchRoom(state.room.id);
     }
     render();
@@ -460,13 +488,18 @@
       return syncing;
     }
     const id = state.room.id;
+    const epoch = currentEpoch;
     syncing = (async function () {
       do {
         syncAgain = false;
         try {
-          await applyState(await request("state", { roomId: id }));
+          const next = await request("state", { roomId: id });
+          if (state?.room.id !== id || epoch !== currentEpoch) return;
+          await applyState(next);
         } catch (error) {
-          setStatus(error.message || "Synchronization warning. Retrying…", true);
+          if (state?.room.id === id && epoch === currentEpoch) {
+            setStatus(error.message || "Synchronization warning. Retrying…", true);
+          }
         }
       } while (syncAgain && state?.room.id === id && isOnline() && !pendingMove);
     })().finally(function () { syncing = null; });
@@ -486,7 +519,7 @@
   }
 
   function notify(event) {
-    if (!channel || !connected) return;
+    if (isSpectator() || !channel || !connected) return;
     channel.send({ type: "broadcast", event,
       payload: { roomId: state?.room.id, roomCode: state?.room.code,
         guestId: userId, guestName: localName(), version: state?.room.version } })
@@ -501,12 +534,12 @@
     });
     channel = subscription;
     const events = ["player-joined", "game-started", "move-made", "game-ended",
-      "rematch-requested", "rematch-accepted", "player-left", "room-closed"];
+      "rematch-requested", "rematch-accepted", "player-left", "opponent-disconnected", "room-closed"];
     for (const event of events) {
       subscription.on("broadcast", { event }, function () { synchronize(); });
     }
     subscription.on("presence", { event: "sync" }, function () {
-      if (epoch !== currentEpoch || !state?.room.guestId) return;
+      if (epoch !== currentEpoch || !state?.room.guestId || isSpectator()) return;
       const other = state.room.hostId === userId ? state.room.guestId : state.room.hostId;
       const present = Boolean(subscription.presenceState()[other]?.length);
       if (opponentPresent && !present) {
@@ -576,7 +609,7 @@
   }
 
   async function submitMove(move) {
-    if (busy || !state?.game || state.room.status !== "active" ||
+    if (isSpectator() || busy || !state?.game || state.room.status !== "active" ||
         state.game.status !== "active") return;
     let applied;
     try {
@@ -622,7 +655,7 @@
 
   function clickSquare(row, col) {
     focused = { row, col };
-    if (busy || !state?.game || state.room.status !== "active" ||
+    if (isSpectator() || busy || !state?.game || state.room.status !== "active" ||
         state.game.status !== "active" || state.room.turn !== localColor()) return;
     const position = { row, col };
     const moves = rules.legalMoves(state.game.board, localColor());
@@ -665,7 +698,7 @@
   }
 
   async function enterRoom(action) {
-    if (busy) return;
+    if (busy || savedCandidate) return;
     const name = ui.name.value.trim();
     if (!name || name.length > 20) {
       setStatus("Enter a guest name of up to 20 characters.", true);
@@ -673,7 +706,7 @@
       return;
     }
     const code = ui.code.value.trim().toUpperCase();
-    if (action === "join" && (!new RegExp("^[" + alphabet + "]{6}$").test(code))) {
+    if (action !== "create" && (!new RegExp("^[" + alphabet + "]{6}$").test(code))) {
       setStatus("Enter a valid six-character room code.", true);
       ui.code.focus();
       return;
@@ -687,6 +720,7 @@
     busy = true;
     ui.create.disabled = true;
     ui.join.disabled = true;
+    ui.spectate.disabled = true;
     setStatus(action === "create" ? "Creating room…" : "Joining room…");
     try {
       const next = await request(action, action === "create"
@@ -700,6 +734,8 @@
       busy = false;
       ui.create.disabled = false;
       ui.join.disabled = false;
+      ui.spectate.disabled = false;
+      render();
     }
   }
 
@@ -713,17 +749,143 @@
     }
     await stopChannel();
     clearStored(storage.room);
+    clearStored("damaPinoy.onlineRoomCode");
     state = null;
     clearSelection();
     pendingMove = false;
     pendingPrevious = null;
     animatedMoveKey = null;
     busy = false;
+    render();
     globalThis.DamaPinoyApp.showScreen("screen-title");
   }
 
+  async function rejoinSaved(leave = false) {
+    if (busy || !savedCandidate) return;
+    busy = true;
+    ui.rejoinButton.disabled = ui.rejoinLeave.disabled = true;
+    const id = savedCandidate;
+    try {
+      const next = await request("state", { roomId: id });
+      verifyState(next);
+      if (leave) {
+        await request("leave", { roomId: id });
+        clearStored(storage.room);
+        clearStored("damaPinoy.onlineRoomCode");
+        savedCandidate = null;
+        ui.rejoin.hidden = true;
+        setStatus("Left the saved room.");
+      } else {
+        await applyState(next);
+      }
+    } catch (error) {
+      setStatus("Could not restore the saved room. It may have expired. " + error.message, true);
+      // Leaving also provides an escape when an expired membership is no longer readable.
+      if (leave) {
+        clearStored(storage.room);
+        clearStored("damaPinoy.onlineRoomCode");
+        savedCandidate = null;
+        ui.rejoin.hidden = true;
+      }
+    } finally {
+      busy = false;
+      ui.rejoinButton.disabled = ui.rejoinLeave.disabled = false;
+      ui.create.disabled = ui.join.disabled = ui.spectate.disabled = Boolean(savedCandidate);
+      if (state) render();
+    }
+  }
+
+  function replayFile(record) {
+    const formats = { single: "single", bestOfThree: "bestOf3", bestOfFive: "bestOf5", bestOfNine: "bestOf9" };
+    if (!record || !Array.isArray(record.moves) || !record.moves.length ||
+        record.moves.length !== record.total_moves || !formats[record.series_format] ||
+        !isColor(record.host_color) || record.guest_color !== opposite(record.host_color)) {
+      throw new Error("Invalid online replay.");
+    }
+    let board = rules.initialBoard();
+    let turn = "R";
+    let quiet = 0;
+    let result = null;
+    const moves = record.moves.map((move, index) => {
+      if (result || move.number !== index + 1 || move.playerColor !== turn) throw new Error("Invalid replay sequence.");
+      const applied = rules.applyMove(board, turn, quiet, move);
+      board = applied.board;
+      quiet = applied.quietPlies;
+      turn = applied.nextTurn;
+      result = applied.result;
+      return { player: move.playerColor === record.host_color ? "P1" : "P2",
+        from: move.from, to: move.to, piece: move.pieceType,
+        captures: move.captures, promoted: move.promoted };
+    });
+    if (!result || record.winner_color !== result.winner || record.result_reason !== result.reason ||
+        record.result !== (result.winner === null ? "draw" : result.winner === record.host_color ? "host" : "guest")) {
+      throw new Error("Invalid replay result.");
+    }
+    const winner = record.result === "host" ? "P1" : record.result === "guest" ? "P2" : "draw";
+    const players = { P1: record.host_name, P2: record.guest_name };
+    const view = userId === record.host_guest_id ? record.host_view :
+      userId === record.guest_guest_id ? record.guest_view : "red-bottom";
+    return { format: "dama-pinoy-replay", version: 1, exportedAt: new Date(record.created_at).toISOString(),
+      players, moves, game: { mode: "online", seriesFormat: formats[record.series_format],
+        gameNumber: record.game_number, seriesScore: { P1: record.host_score, P2: record.guest_score },
+        aiDifficulty: null, result: winner, winner: winner === "draw" ? null : players[winner],
+        resultDetail: "Online · Series " + record.series_number + " · " + record.result_reason,
+        totalMoves: moves.length, startingPlayer: "red", view,
+        colors: { P1: record.host_color === "R" ? "red" : "blue", P2: record.guest_color === "R" ? "red" : "blue" } } };
+  }
+
+  async function viewOnlineReplay(details, download = false) {
+    try {
+      if (!isOnline()) throw new Error("Online replays require an internet connection.");
+      const result = await request("replay", details, true);
+      if (!globalThis.DamaPinoyApp.openOnlineReplay(replayFile(result.replay), download)) {
+        throw new Error("Could not export this replay.");
+      }
+    } catch (error) {
+      setStatus(error.message || "Could not load online replay.", true);
+      ui.replaysStatus.textContent = error.message || "Could not load online replay.";
+    }
+  }
+
+  async function loadReplays() {
+    ui.replaysButton.disabled = true;
+    ui.replaysStatus.textContent = "Loading online replays…";
+    try {
+      if (!isOnline()) throw new Error("Online replays require an internet connection. Local replay viewing still works offline.");
+      const result = await request("replays", {}, true);
+      if (!Array.isArray(result.replays) || result.replays.length > 20) throw new Error("Invalid replay list.");
+      ui.replaysList.replaceChildren();
+      for (const replay of result.replays) {
+        const ownHost = replay.host_guest_id === userId;
+        if (!ownHost && replay.guest_guest_id !== userId) throw new Error("Invalid replay ownership.");
+        const item = document.createElement("li");
+        const label = document.createElement("p");
+        const outcome = replay.result === "draw" ? "Draw" :
+          (replay.result === "host") === ownHost ? "Win" : "Loss";
+        label.textContent = new Date(replay.created_at).toLocaleString() + " · " +
+          (ownHost ? replay.guest_name : replay.host_name) + " · " +
+          (FORMAT_LABELS[replay.series_format] || "Match") + " · Series " + replay.series_number +
+          ", Game " + replay.game_number + " · " + outcome;
+        item.appendChild(label);
+        for (const download of [false, true]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "btn btn--ghost";
+          button.textContent = download ? "Export Replay" : "View Replay";
+          button.addEventListener("click", () => viewOnlineReplay({ replayId: replay.id }, download));
+          item.appendChild(button);
+        }
+        ui.replaysList.appendChild(item);
+      }
+      ui.replaysStatus.textContent = result.replays.length ? "Showing your latest " + result.replays.length + " replays." :
+        "No online replays yet. Finish an online game to record one.";
+    } catch (error) {
+      ui.replaysStatus.textContent = error.message || "Could not load online replays. Try again.";
+    } finally { ui.replaysButton.disabled = false; }
+  }
+
   async function rematch() {
-    if (busy || !state || state.game?.status !== "finished" ||
+    if (isSpectator() || busy || !state || state.game?.status !== "finished" ||
         !["active", "finished"].includes(state.room.status)) return;
     const label = nextActionLabel(state.room);
     busy = true;
@@ -741,6 +903,7 @@
 
   async function openOnline() {
     globalThis.DamaPinoyApp.showScreen("screen-online");
+    render();
     if (!isOnline()) {
       setStatus("Online Multiplayer needs an internet connection. Local play still works offline.", true);
       return;
@@ -748,10 +911,16 @@
     try {
       await ensureGuest();
       const saved = getStored(storage.room);
-      if (saved) await applyState(await request("state", { roomId: saved }));
-      else setStatus("Enter a guest name to create or join a room.");
+      if (state && state.room.status !== "closed") { render(); return; }
+      if (saved) {
+        savedCandidate = saved;
+        ui.rejoin.hidden = false;
+        ui.rejoinText.textContent = "You have a saved room" +
+          (getStored("damaPinoy.onlineRoomCode") ? ": " + getStored("damaPinoy.onlineRoomCode") : "") + ". Rejoin?";
+        ui.create.disabled = ui.join.disabled = ui.spectate.disabled = true;
+        setStatus("You have a saved room. Rejoin or leave it before starting another.");
+      } else setStatus("Enter a guest name to create or join a room.");
     } catch (error) {
-      clearStored(storage.room);
       setStatus(error.message || "Online service is unavailable.", true);
     }
   }
@@ -765,6 +934,19 @@
     ui.code = document.getElementById("online-code");
     ui.create = document.getElementById("btn-create-room");
     ui.join = document.getElementById("btn-join-room");
+    ui.spectate = document.getElementById("btn-spectate-room");
+    ui.rejoin = document.getElementById("online-rejoin");
+    ui.rejoinText = document.getElementById("online-rejoin-text");
+    ui.rejoinButton = document.getElementById("btn-online-rejoin");
+    ui.rejoinLeave = document.getElementById("btn-online-rejoin-leave");
+    ui.spectatorBadge = document.getElementById("online-spectator-badge");
+    ui.spectators = document.getElementById("online-spectators");
+    ui.lastMove = document.getElementById("online-last-move");
+    ui.replayActions = document.getElementById("online-replay-actions");
+    ui.replaysButton = document.getElementById("btn-online-replays");
+    ui.replaysStatus = document.getElementById("online-replays-status");
+    ui.replaysList = document.getElementById("online-replays-list");
+    ui.replaysPanel = document.getElementById("online-replays");
     ui.roomCode = document.getElementById("online-room-code");
     ui.gameCode = document.getElementById("online-game-code");
     ui.waitingPlayers = document.getElementById("online-waiting-players");
@@ -801,6 +983,16 @@
     });
     ui.create.addEventListener("click", () => enterRoom("create"));
     ui.join.addEventListener("click", () => enterRoom("join"));
+    ui.spectate.addEventListener("click", () => enterRoom("spectate"));
+    ui.rejoinButton.addEventListener("click", () => rejoinSaved());
+    ui.rejoinLeave.addEventListener("click", () => rejoinSaved(true));
+    ui.replaysButton.addEventListener("click", loadReplays);
+    document.getElementById("btn-online-view-replay").addEventListener("click", () => {
+      if (state?.game?.status === "finished") viewOnlineReplay({ gameId: state.game.id });
+    });
+    document.getElementById("btn-online-export-replay").addEventListener("click", () => {
+      if (state?.game?.status === "finished") viewOnlineReplay({ gameId: state.game.id }, true);
+    });
     ui.code.addEventListener("input", function () {
       ui.code.value = ui.code.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
     });
@@ -828,6 +1020,7 @@
       openOnline, verifyState, applyState, clickSquare,
       getState: () => state, getSelection: () => selection,
       getUserId: () => userId, synchronize,
+      replayFile, loadReplays, rejoinSaved,
     };
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

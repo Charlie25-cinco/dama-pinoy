@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "dama-pinoy-v2.1.0";
+const CACHE_NAME = "dama-pinoy-v2.2.0";
 const APP_SHELL = [
   "./",
   "./index.html",

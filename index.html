@@ -138,6 +138,12 @@
         <p id="online-status" class="online-status" role="status" aria-live="polite">Enter a guest name to get started.</p>
 
         <div id="online-entry" class="online-entry">
+          <section id="online-rejoin" class="online-entry__panel" aria-labelledby="online-rejoin-heading" hidden>
+            <h3 id="online-rejoin-heading">Saved room</h3>
+            <p id="online-rejoin-text">You have a saved room. Rejoin?</p>
+            <button type="button" id="btn-online-rejoin" class="btn btn--primary">Rejoin Room</button>
+            <button type="button" id="btn-online-rejoin-leave" class="btn btn--ghost">Leave Room</button>
+          </section>
           <div class="online-entry__identity">
             <label class="field-label" for="online-name">Guest name</label>
             <input id="online-name" class="name-input online-input" type="text" maxlength="20" autocomplete="nickname" placeholder="Your name" required>
@@ -189,10 +195,18 @@
               <input id="online-code" class="name-input online-input online-code-input" type="text" maxlength="6" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="K7Q2XN" aria-describedby="online-code-hint">
               <p id="online-code-hint" class="online-hint">Letters and numbers, without 0, O, 1, I, or L.</p>
               <button type="button" id="btn-join-room" class="btn btn--ghost">Join Room</button>
+              <button type="button" id="btn-spectate-room" class="btn btn--ghost">Join as Spectator</button>
             </section>
           </div>
           <button type="button" id="btn-online-back" class="btn btn--ghost">Back to Menu</button>
         </div>
+
+        <section id="online-replays" class="online-replays" aria-labelledby="online-replays-heading">
+          <h3 id="online-replays-heading">Online Replays</h3>
+          <button type="button" id="btn-online-replays" class="btn btn--ghost">Load Recent Replays</button>
+          <p id="online-replays-status" role="status">Your latest 20 completed online games. Internet required.</p>
+          <ul id="online-replays-list" class="online-replays__list"></ul>
+        </section>
 
         <div id="online-waiting" class="online-waiting" hidden>
           <p class="online-label">Room code</p>
@@ -215,6 +229,7 @@
           <aside class="side-panel online-side" aria-label="Online match controls">
             <p class="online-label">Room <strong id="online-game-code">------</strong></p>
             <p id="online-connection" class="online-connection" role="status">Connecting…</p>
+            <p id="online-spectator-badge" class="online-spectator-badge" hidden>Spectator · Read-only · Red-bottom view</p>
             <h3 id="online-turn" class="online-turn">Waiting for players</h3>
             <p id="online-game-players" class="online-players"></p>
             <div id="online-series" class="online-series" hidden>
@@ -223,6 +238,12 @@
             </div>
             <p id="online-result" class="online-result" hidden></p>
             <p id="online-match-result" class="online-match-result" hidden></p>
+            <p id="online-last-move" class="online-hint"></p>
+            <p id="online-spectators" class="online-hint"></p>
+            <div id="online-replay-actions" hidden>
+              <button type="button" id="btn-online-view-replay" class="btn btn--ghost">View Replay</button>
+              <button type="button" id="btn-online-export-replay" class="btn btn--ghost">Export Replay</button>
+            </div>
             <section class="history" aria-labelledby="online-history-heading">
               <h4 id="online-history-heading" class="panel-title">Move history</h4>
               <ol id="online-history" class="move-list" tabindex="0" aria-label="Online moves"></ol>

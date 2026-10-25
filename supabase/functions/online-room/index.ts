@@ -1,4 +1,4 @@
-// Dama Pinoy v2.1. Deploy with JWT verification enabled. Never bundle this
+// Dama Pinoy v2.2. Deploy with JWT verification enabled. Never bundle this
 // function or its service-role environment variable into the frontend.
 import "../../../online-rules.js";
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
@@ -42,7 +42,7 @@ function roomOptions(body) {
   const color = body.color === undefined ? "R" : body.color;
   const format = body.format === undefined ? "single" : body.format;
   if ((color !== "R" && color !== "B") ||
-      typeof format !== "string" || !rules.MATCH_GAME_LIMITS[format]) {
+      typeof format !== "string" || !Object.prototype.hasOwnProperty.call(rules.MATCH_GAME_LIMITS, format)) {
     throw new Error("Invalid room options.");
   }
   return { color, format };
@@ -50,7 +50,14 @@ function roomOptions(body) {
 
 async function snapshot(db, roomId, userId, attempt = 0) {
   const { data: room, error } = await db.from("rooms").select("*").eq("id", roomId).single();
-  if (error || !room || (room.host_user_id !== userId && room.guest_user_id !== userId)) {
+  if (error || !room) {
+    throw new Error("Room unavailable.");
+  }
+  const spectators = await db.from("room_spectators").select("guest_id,guest_name,last_seen_at")
+    .eq("room_id", roomId).gt("last_seen_at", new Date(Date.now() - 60000).toISOString());
+  if (spectators.error) throw new Error("Room unavailable.");
+  const isPlayer = room.host_user_id === userId || room.guest_user_id === userId;
+  if (!isPlayer && !(spectators.data || []).some((s) => s.guest_id === userId)) {
     throw new Error("Room unavailable.");
   }
   let game = null;
@@ -76,6 +83,8 @@ async function snapshot(db, roomId, userId, attempt = 0) {
     return snapshot(db, roomId, userId, attempt + 1);
   }
   return {
+    role: isPlayer ? "player" : "spectator",
+    spectators: (spectators.data || []).map((s) => ({ id: s.guest_id, name: s.guest_name })),
     room: {
       id: room.id, code: room.room_code, status: room.status,
       hostId: room.host_user_id, guestId: room.guest_user_id,
@@ -164,17 +173,39 @@ Deno.serve(async (request) => {
         }
         throw new Error("Could not create a room. Try again.");
       }
+      case "spectate":
       case "join": {
         const name = guestName(body.name);
         const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
         if (!new RegExp("^[" + alphabet + "]{6}$").test(code)) {
           throw new Error("Enter a valid six-character room code.");
         }
-        id = await rpc(db, "online_join_room", {
+        id = await rpc(db, body.action === "spectate" ? "online_join_spectator" : "online_join_room", {
           p_code: code, p_name: name, p_user: userId,
-          p_board: rules.initialBoard(),
+          ...(body.action === "join" ? { p_board: rules.initialBoard() } : {}),
         });
         return reply({ state: await snapshot(db, id, userId) });
+      }
+      case "replays": {
+        // Execute reads with the caller JWT, not service-role privileges.
+        const reader = createClient(url, publicKey, { auth: { persistSession: false },
+          global: { headers: { Authorization: "Bearer " + token } } });
+        const list = await reader.from("online_replays")
+          .select("id,host_guest_id,guest_guest_id,host_name,guest_name,series_format,series_number,game_number,result,created_at")
+          .or("host_guest_id.eq." + userId + ",guest_guest_id.eq." + userId)
+          .order("created_at", { ascending: false }).limit(20);
+        if (list.error) throw new Error("Room unavailable.");
+        return reply({ replays: list.data || [] });
+      }
+      case "replay": {
+        const reader = createClient(url, publicKey, { auth: { persistSession: false },
+          global: { headers: { Authorization: "Bearer " + token } } });
+        let query = reader.from("online_replays").select("*");
+        query = body.replayId ? query.eq("id", requireRoomId(body.replayId))
+          : query.eq("game_id", requireRoomId(body.gameId));
+        const replay = await query.single();
+        if (replay.error || !replay.data) throw new Error("Room unavailable.");
+        return reply({ replay: replay.data });
       }
       case "state":
       case "heartbeat": {
@@ -188,7 +219,8 @@ Deno.serve(async (request) => {
         const current = await snapshot(db, id, userId);
         const room = current.room;
         const game = current.game;
-        const owner = game && (room.hostId === userId ? game.hostColor : game.guestColor);
+        const owner = game && (room.hostId === userId ? game.hostColor :
+          room.guestId === userId ? game.guestColor : null);
         if (room.status !== "active" || !game || game.status !== "active" ||
             game.id !== body.gameId ||
             !Number.isInteger(body.moveNumber) || body.moveNumber !== game.moveCount + 1 ||
@@ -219,6 +251,11 @@ Deno.serve(async (request) => {
       }
       case "leave": {
         id = requireRoomId(body.roomId);
+        const current = await snapshot(db, id, userId);
+        if (current.role === "spectator") {
+          await rpc(db, "online_leave_spectator", { p_room: id, p_user: userId });
+          return reply({ left: true });
+        }
         await rpc(db, "online_leave_room", { p_room: id, p_user: userId });
         return reply({ state: await snapshot(db, id, userId) });
       }

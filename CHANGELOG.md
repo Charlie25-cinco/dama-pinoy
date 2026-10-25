@@ -2,6 +2,12 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.2.0 — 2026-10-25
+
+- **Added:** Transactionally recorded online replays with participant-only recent history (latest 20), validated viewing/export, and per-player board orientation, separate from local Last Replay and statistics.
+- **Added:** Up to five Auth-owned, read-only room spectators with server-enforced membership, private live updates, a spectator badge/list, and last-move feedback.
+- **Changed:** Saved rooms offer explicit Rejoin/Leave controls, restore authoritative state within the existing disconnect grace, and discard stale in-flight sync responses after leaving. Updated the offline cache.
+
 ## 2.1.0 — 2026-10-25
 
 - **Added:** Online room hosts can choose their Game 1 color and Single Game, Best of 3, Best of 5, or Best of 9. Online series keep player-owned scores, swap colors each game, count draws toward the game limit, and require both players to confirm the next game or new series.

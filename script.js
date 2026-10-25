@@ -611,7 +611,7 @@
     return Boolean(
       value &&
         (value.version === 1 || value.version === REPLAY_VERSION) &&
-        (value.mode === "twoPlayer" || value.mode === "vsComputer") &&
+        (value.mode === "twoPlayer" || value.mode === "vsComputer" || value.mode === "online") &&
         MATCH_FORMATS.indexOf(value.format) !== -1 &&
         Number.isInteger(value.gameNumber) &&
         value.gameNumber >= 1 &&
@@ -821,7 +821,7 @@
     const game = file.game;
     const players = file.players;
     const format = REPLAY_INTERNAL_FORMATS[game.seriesFormat];
-    if (GAME_MODES.indexOf(game.mode) === -1 || !format ||
+    if ((GAME_MODES.indexOf(game.mode) === -1 && game.mode !== "online") || !format ||
         !replayFileText(players.P1, 40) || !replayFileText(players.P2, 40) ||
         !replayFileObject(game.colors) ||
         (game.colors.P1 !== "red" && game.colors.P1 !== "blue") ||
@@ -2774,7 +2774,7 @@
   }
 
   function replayModeLabel(data) {
-    let label = data.mode === "vsComputer" ? "vs Computer" : "2-player";
+    let label = data.mode === "online" ? "Online" : data.mode === "vsComputer" ? "vs Computer" : "2-player";
     if (data.difficulty) {
       label += " · " + data.difficulty.charAt(0).toUpperCase() + data.difficulty.slice(1);
     }
@@ -3927,7 +3927,14 @@
   }
 
   // The separate online client only needs the shared screen-navigation contract.
-  globalThis.DamaPinoyApp = Object.freeze({ showScreen });
+  globalThis.DamaPinoyApp = Object.freeze({ showScreen,
+    openOnlineReplay(file, download = false) {
+      const imported = deserializeReplay(file);
+      openReplayData(imported.data, "screen-online", imported.exportedAt, imported.view);
+      if (download) return exportReplay();
+      return true;
+    },
+  });
 
   if (globalThis.__DAMA_TEST__) {
     globalThis.DamaPinoyTest = {
