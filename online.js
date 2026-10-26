@@ -85,18 +85,21 @@
   }
   function setRecovery(enabled, id = null) {
     recovery = enabled;
+    // Persisted so a verified-but-unfinished reset reopens the new-password step
+    // in any tab instead of resurfacing as a normal login. Holds no credentials.
     try {
-      if (enabled && id) sessionStorage.setItem("damaPinoy.recovery", JSON.stringify({ userId: id, at: Date.now() }));
-      else sessionStorage.removeItem("damaPinoy.recovery");
+      if (enabled && id) localStorage.setItem("damaPinoy.recovery", JSON.stringify({ userId: id, at: Date.now() }));
+      else localStorage.removeItem("damaPinoy.recovery");
+      sessionStorage.removeItem("damaPinoy.recovery");
     } catch (error) { /* The in-memory recovery flow still works. */ }
   }
   function restoreRecovery(session) {
     try {
-      const value = JSON.parse(sessionStorage.getItem("damaPinoy.recovery"));
+      const value = JSON.parse(getStored("damaPinoy.recovery"));
       if (value && value.userId === session?.user?.id && Date.now() - value.at < 3600000) {
         recovery = true;
       } else if (value) setRecovery(false);
-    } catch (error) { /* Optional session storage. */ }
+    } catch (error) { /* Optional local storage. */ }
   }
   function finishAuthCallback() {
     if (!authCallback.present) return Promise.resolve(null);
@@ -203,7 +206,7 @@
       getStored(storage.name) || "Guest · 2-player & vs AI";
     document.getElementById("account-auth").hidden = signedIn && !recovery && !reauth;
     document.getElementById("account-profile").hidden = !signedIn || recovery || reauth;
-    document.getElementById("btn-menu-logout").hidden = !signedIn;
+    document.getElementById("btn-menu-logout").hidden = !signedIn || recovery;
     renderAccountHeading();
     if (signedIn) {
       document.getElementById("account-email-display").textContent = account.email || "Email confirmation pending";
@@ -217,8 +220,9 @@
     const login = mode === "login" && !recovery && !reauth;
     document.getElementById("account-tab-signup").hidden = !login;
     document.getElementById("btn-account-reset").hidden = !login;
-    document.getElementById("account-tab-login").hidden = login || recovery;
-    document.getElementById("account-tab-login").textContent = reauth ? "Cancel" : "Back to Log In";
+    document.getElementById("account-tab-login").hidden = login;
+    document.getElementById("account-tab-login").textContent = recovery ? "Cancel Reset" :
+      reauth ? "Cancel" : "Back to Log In";
     const password = document.getElementById("account-password");
     password.hidden = mode === "reset" || mode === "resetVerify";
     password.required = !password.hidden;
@@ -456,6 +460,7 @@
         } else result = await service.auth.signInWithPassword({ email, password });
         if (result.error) throw new Error("Login failed. Check your credentials and email confirmation, or reset your password.");
         reauth = false;
+        setRecovery(false);
         accountStatus("Logged in. Your private online records are available.");
       }
       await syncAccount();
@@ -474,6 +479,24 @@
       await syncAccount();
       accountStatus("Logged out. Local/guest statistics and preferences are unchanged. A new guest identity will be created when needed.");
     });
+  }
+  async function cancelRecovery() {
+    // A verified-but-unfinished reset is not a login: drop the recovery session
+    // so the lobby never shows a completed account state for an abandoned reset.
+    accountBusy = true;
+    try {
+      const service = await loadClient();
+      await service.auth.signOut({ scope: "local" });
+    } catch (error) { /* Offline: local state is still cleared below. */ }
+    clearStored("damaPinoy.accountExpected");
+    clearStored("damaPinoy.authIntent");
+    setRecovery(false);
+    reauth = false;
+    accountBusy = false;
+    setAccountMode("login");
+    accountStatus("Password reset cancelled and signed out. Your password was not changed.");
+    try { await syncAccount(); } catch (error) { renderAccount(); }
+    updateResetControls();
   }
   function renderAccountStats() {
     const section = document.getElementById("account-stats");
@@ -514,19 +537,28 @@
   function initAccount() {
     document.getElementById("btn-account").addEventListener("click", openAccount);
     document.getElementById("btn-online-account").addEventListener("click", openAccount);
-    document.getElementById("btn-account-back").addEventListener("click", () => globalThis.DamaPinoyApp.showScreen(accountReturnScreen));
+    document.getElementById("btn-account-back").addEventListener("click", async () => {
+      if (recovery) await cancelRecovery();
+      globalThis.DamaPinoyApp.showScreen(accountReturnScreen);
+    });
     document.getElementById("account-form").addEventListener("submit", submitAccount);
-    for (const mode of ["login", "signup"]) {
-      document.getElementById("account-tab-" + mode).addEventListener("click", () => {
-        reauth = false;
-        setRecovery(false);
-        setAccountMode(mode);
-        renderAccount();
-        accountStatus(mode === "signup" ? "Create an account and keep your guest identity and local data." :
-          account ? "Your account is ready." : "Enter your account email and password.");
-        document.getElementById(account ? "account-heading" : "account-email").focus();
-      });
-    }
+    document.getElementById("account-tab-login").addEventListener("click", async () => {
+      if (recovery) { await cancelRecovery(); return; }
+      reauth = false;
+      setRecovery(false);
+      setAccountMode("login");
+      renderAccount();
+      accountStatus(account ? "Your account is ready." : "Enter your account email and password.");
+      document.getElementById(account ? "account-heading" : "account-email").focus();
+    });
+    document.getElementById("account-tab-signup").addEventListener("click", () => {
+      reauth = false;
+      setRecovery(false);
+      setAccountMode("signup");
+      renderAccount();
+      accountStatus("Create an account and keep your guest identity and local data.");
+      document.getElementById("account-email").focus();
+    });
     document.getElementById("btn-account-reset").addEventListener("click", () => {
       setRecovery(false);
       setAccountMode("reset");

@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.4.2 — 2026-10-26
+
+- **Fixed:** An unfinished password reset no longer turns into a normal login. A verified recovery session now stays a pending reset: reopening the app in any tab returns to **Set New Password** instead of the lobby, the normal Log Out control stays hidden, and **Back to Menu** or **Cancel Reset** signs the recovery session out. Requesting a code alone still creates no session.
+- **Changed:** The pending-reset marker is stored in `localStorage` (user ID and time only, never tokens) so it survives a new tab; normal login, logout, and saving the new password clear it. Refreshed the installed app cache.
+
 ## 2.4.1 — 2026-10-26
 
 - **Fixed:** Simplified account access to email/password Log In, Create Account, and Forgot Password. Removed the magic-link request, passwordless-signup checkbox, and redundant reset/guest choices from the form.
