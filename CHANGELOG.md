@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.3.1 — 2026-10-26
+
+- **Fixed:** Scoped compact desktop player-name positioning to player cards so account email/password fields no longer overlap. Account inputs now have visible theme-consistent surfaces, borders, and focus feedback.
+- **Changed:** Refreshed the installed app cache for the account form layout fix.
+
 ## 2.3.0 — 2026-10-26
 
 - **Added:** Optional email/password and passwordless email-link accounts, anonymous-identity upgrades, profile editing, session restoration, recovery UI, logout, and confirmed account deletion.

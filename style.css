@@ -450,7 +450,20 @@ body {
 }
 .account-panel h2 { font-family: var(--font-display); color: var(--heading); }
 .account-fields { display: grid; gap: var(--space-3); min-width: 0; }
-.account-fields input:not([type="checkbox"]) { width: 100%; min-height: 48px; }
+.account-fields input:not([type="checkbox"]) {
+  width: 100%;
+  min-height: 48px;
+  grid-column: auto;
+  grid-row: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-family: var(--font-ui);
+  font-size: 1rem;
+}
+.account-fields .name-input:hover { border-color: var(--accent); }
+.account-fields .name-input:focus { border-color: var(--accent); }
 .account-tabs { display: flex; gap: var(--space-2); margin: var(--space-3) 0; }
 .account-tabs button { flex: 1; min-height: 44px; border: 2px solid var(--border);
   border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
@@ -2188,7 +2201,7 @@ body {
     font-size: 0.62rem;
   }
 
-  .name-input {
+  .player-card .name-input {
     grid-column: 1;
     grid-row: 2;
     padding: 0 2px 1px;
