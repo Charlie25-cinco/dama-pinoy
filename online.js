@@ -214,6 +214,8 @@
       ui.name.value = account.displayName;
     } else ui.name.value = getStored(storage.name) || "";
     ui.name.readOnly = signedIn;
+    if (signedIn && !recovery && !reauth) syncLeaderboardToggle();
+    else if (!signedIn) setLeaderboardCheckbox(false);
   }
   function setAccountMode(mode) {
     accountMode = mode;
@@ -346,6 +348,7 @@
       ui.replaysList.replaceChildren();
       ui.replaysStatus.textContent = "Load replays for the current identity.";
       document.getElementById("account-stats-values").replaceChildren();
+      resetLeaderboardState();
       render();
     }
     userId = nextId;
@@ -534,6 +537,275 @@
     finally { statsLoading = false; }
   }
 
+  let leaderboard = {
+    board: "wins", rows: [], me: null, self: null, visible: false, loaded: false,
+    loading: false, loadedAt: 0, returnScreen: "screen-title", cache: new Map(),
+    toggleUser: null, generation: 0, request: 0
+  };
+  const leaderboardBoards = {
+    wins: { metric: "Wins", value: (row) => row.total_wins },
+    win_rate: { metric: "Win rate", value: (row) => row.win_rate, percent: true },
+    bo3: { metric: "Best of 3 wins", value: (row) => row.best_of_3_wins },
+    bo5: { metric: "Best of 5 wins", value: (row) => row.best_of_5_wins },
+    bo9: { metric: "Best of 9 wins", value: (row) => row.best_of_9_wins },
+    streak: { metric: "Current streak", value: (row) => row.current_win_streak }
+  };
+
+  function leaderboardStatus(text) { document.getElementById("leaderboard-status").textContent = text; }
+  function formatWinRate(value) {
+    const rate = Number(value);
+    return Number.isFinite(rate) ? rate.toFixed(1) + "%" : "—";
+  }
+  function formatActiveDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString(undefined,
+      { year: "numeric", month: "short", day: "numeric" });
+  }
+  function setLeaderboardCheckbox(visible, message) {
+    const checkbox = document.getElementById("account-leaderboard-visible");
+    checkbox.checked = visible === true;
+    document.getElementById("account-leaderboard-hint").textContent = message ||
+      (visible ? "You appear on public leaderboards with your display name and verified online record. Your email is never shown." :
+        "Off by default. When on, your display name and verified online record appear on public leaderboards. Turning it off hides your entry but keeps your record.");
+  }
+  function resetLeaderboardState() {
+    leaderboard.generation += 1;
+    leaderboard.request += 1;
+    leaderboard.loading = false;
+    leaderboard.rows = [];
+    leaderboard.me = null;
+    leaderboard.self = null;
+    leaderboard.visible = false;
+    leaderboard.loaded = false;
+    leaderboard.loadedAt = 0;
+    leaderboard.toggleUser = null;
+    leaderboard.cache.clear();
+    if (document.getElementById("account-leaderboard-visible")) setLeaderboardCheckbox(false);
+    document.getElementById("account-leaderboard-visible").disabled = false;
+    document.getElementById("btn-leaderboard-refresh").disabled = false;
+    renderLeaderboard();
+  }
+  function renderLeaderboard() {
+    const board = leaderboardBoards[leaderboard.board];
+    document.getElementById("leaderboard-metric-heading").textContent = board.metric;
+    for (const button of document.querySelectorAll(".leaderboard-board")) {
+      button.setAttribute("aria-pressed", String(button.dataset.board === leaderboard.board));
+    }
+    const body = document.getElementById("leaderboard-rows");
+    body.replaceChildren();
+    for (const row of leaderboard.rows) {
+      const tr = document.createElement("tr");
+      const mine = Boolean(account && row.user_id === account.id);
+      if (mine) { tr.classList.add("is-me"); tr.setAttribute("aria-current", "true"); }
+      const cells = [
+        ["Rank", "#" + row.rank],
+        ["Player", row.display_name || "Player"],
+        [board.metric, board.percent ? formatWinRate(board.value(row)) : String(board.value(row) ?? 0)],
+        ["Games", String(row.total_games ?? 0)],
+        ["Win rate", formatWinRate(row.win_rate)],
+        ["Last active", formatActiveDate(row.last_active_at)]
+      ];
+      for (const [label, text] of cells) {
+        const cell = document.createElement("td");
+        cell.dataset.label = label;
+        cell.textContent = text;
+        tr.appendChild(cell);
+      }
+      if (mine) tr.firstChild.textContent = "You · " + tr.firstChild.textContent;
+      if (leaderboard.board === "streak") {
+        const longest = document.createElement("small");
+        longest.textContent = " · Longest: " + (row.longest_win_streak ?? 0);
+        tr.children[2].appendChild(longest);
+      }
+      body.appendChild(tr);
+    }
+    const empty = document.getElementById("leaderboard-empty");
+    document.getElementById("leaderboard-table-wrap").hidden = leaderboard.rows.length === 0;
+    empty.hidden = leaderboard.rows.length > 0 || !leaderboard.loaded;
+    const me = document.getElementById("leaderboard-me");
+    if (!leaderboard.loaded) me.textContent = "";
+    else if (leaderboard.me) me.textContent = "Your rank: #" + leaderboard.me.rank + " on this board.";
+    else if (!account) me.textContent = "Log in to appear on leaderboards. Guest and local records are never ranked.";
+    else if (!leaderboard.visible) me.textContent = "You are not on the leaderboard. Turn on “Appear on Leaderboards” in Account to join.";
+    else if (leaderboard.board === "win_rate" && Number(leaderboard.self?.total_games || 0) < 10) {
+      me.textContent = "Win Rate needs 10 completed online games. You have " +
+        Number(leaderboard.self?.total_games || 0) + ".";
+    } else me.textContent = "You are outside the top 50 for this board.";
+  }
+  function applyLeaderboard(result) {
+    leaderboard.rows = result.rows;
+    leaderboard.me = result.me;
+    leaderboard.self = result.self;
+    leaderboard.visible = result.visible;
+    leaderboard.loaded = true;
+    renderLeaderboard();
+  }
+  async function loadLeaderboard(options = {}) {
+    const force = options.force === true;
+    if (!isOnline()) {
+      leaderboard.request += 1;
+      leaderboard.loading = false;
+      document.getElementById("btn-leaderboard-refresh").disabled = false;
+      leaderboard.loaded = false;
+      leaderboard.rows = [];
+      renderLeaderboard();
+      leaderboardStatus("Leaderboards need an internet connection. Local play still works offline.");
+      return;
+    }
+    const now = Date.now();
+    // An explicit Refresh keeps a short cooldown; switching boards only uses the cache.
+    if (force && leaderboard.loadedAt && now - leaderboard.loadedAt < 5000) {
+      leaderboardStatus("Just refreshed. Try again in a few seconds.");
+      return;
+    }
+    const cached = leaderboard.cache.get(leaderboard.board);
+    if (!force && cached && now - cached.at < 30000) {
+      leaderboard.request += 1;
+      leaderboard.loading = false;
+      document.getElementById("btn-leaderboard-refresh").disabled = false;
+      applyLeaderboard(cached);
+      leaderboardStatus("Showing the top 50 for this board.");
+      return;
+    }
+    const board = leaderboard.board;
+    const generation = leaderboard.generation;
+    const requestId = ++leaderboard.request;
+    const current = () => generation === leaderboard.generation && requestId === leaderboard.request;
+    leaderboard.loading = true;
+    const button = document.getElementById("btn-leaderboard-refresh");
+    button.disabled = true;
+    leaderboardStatus("Loading leaderboard…");
+    try {
+      await ensureGuest();
+      if (!current()) return;
+      const service = await loadClient();
+      const result = await service.rpc("leaderboard_page",
+        { p_board: board, p_limit: 50 });
+      if (!current()) return;
+      if (result.error) throw new Error("Could not load the leaderboard. Try again.");
+      const data = result.data || {};
+      const next = {
+        rows: Array.isArray(data.rows) ? data.rows : [], me: data.me || null,
+        self: data.self || null, visible: data.visible === true, at: Date.now()
+      };
+      leaderboard.cache.set(board, next);
+      applyLeaderboard(next);
+      leaderboardStatus(leaderboard.rows.length ? "Updated just now. Showing the top 50." :
+        "No players on this board yet.");
+    } catch (error) {
+      if (!current()) return;
+      leaderboard.loaded = false;
+      leaderboard.rows = [];
+      renderLeaderboard();
+      leaderboardStatus(error.message || "Could not load the leaderboard. Check your connection and try again.");
+    } finally {
+      if (current()) {
+        leaderboard.loading = false;
+        leaderboard.loadedAt = Date.now();
+        button.disabled = false;
+      }
+    }
+  }
+  function setLeaderboardBoard(board) {
+    if (!leaderboardBoards[board]) return;
+    leaderboard.board = board;
+    leaderboard.request += 1;
+    leaderboard.rows = [];
+    leaderboard.loaded = false;
+    renderLeaderboard();
+    loadLeaderboard();
+  }
+  function openLeaderboard() {
+    leaderboard.returnScreen = document.getElementById("screen-account").hidden ?
+      "screen-title" : "screen-account";
+    globalThis.DamaPinoyApp.showScreen("screen-leaderboard");
+    renderLeaderboard();
+    loadLeaderboard();
+  }
+  function closeLeaderboard() {
+    const target = leaderboard.returnScreen;
+    globalThis.DamaPinoyApp.showScreen(target);
+    const opener = document.getElementById(target === "screen-account" ?
+      "btn-account-leaderboard" : "btn-leaderboard");
+    if (opener && typeof opener.focus === "function") opener.focus({ preventScroll: true });
+  }
+  async function syncLeaderboardToggle() {
+    if (!account) { setLeaderboardCheckbox(false); return; }
+    if (leaderboard.toggleUser === account.id) return;
+    const id = account.id;
+    const generation = leaderboard.generation;
+    leaderboard.toggleUser = id;
+    const checkbox = document.getElementById("account-leaderboard-visible");
+    checkbox.disabled = true;
+    try {
+      const service = await loadClient();
+      const result = await service.from("leaderboard_profiles").select("visible")
+        .eq("user_id", id).maybeSingle();
+      if (generation !== leaderboard.generation || account?.id !== id) return;
+      if (result.error) throw result.error;
+      leaderboard.visible = result.data?.visible === true;
+      setLeaderboardCheckbox(leaderboard.visible);
+    } catch (error) {
+      if (generation !== leaderboard.generation || account?.id !== id) return;
+      leaderboard.toggleUser = null;
+      setLeaderboardCheckbox(false, "Leaderboard setting could not be loaded. Try again when online.");
+    } finally {
+      if (generation === leaderboard.generation && account?.id === id) checkbox.disabled = false;
+    }
+  }
+  async function saveLeaderboardVisibility(enabled) {
+    if (!account) { setLeaderboardCheckbox(false); return; }
+    const id = account.id;
+    const generation = leaderboard.generation;
+    const checkbox = document.getElementById("account-leaderboard-visible");
+    checkbox.disabled = true;
+    try {
+      const service = await loadClient();
+      if (generation !== leaderboard.generation || account?.id !== id) return;
+      const result = await service.from("leaderboard_profiles").update({ visible: enabled })
+        .eq("user_id", id).select("visible").single();
+      if (generation !== leaderboard.generation || account?.id !== id) return;
+      if (result.error) throw result.error;
+      leaderboard.visible = result.data?.visible === true;
+      leaderboard.cache.clear();
+      leaderboard.request += 1;
+      leaderboard.loading = false;
+      leaderboard.loaded = false;
+      leaderboard.rows = [];
+      leaderboard.me = null;
+      leaderboard.self = null;
+      document.getElementById("btn-leaderboard-refresh").disabled = false;
+      renderLeaderboard();
+      setLeaderboardCheckbox(leaderboard.visible);
+      accountStatus(enabled ? "You now appear on public leaderboards." :
+        "You are hidden from public leaderboards. Your verified record is kept.");
+    } catch (error) {
+      if (generation !== leaderboard.generation || account?.id !== id) return;
+      checkbox.checked = !enabled;
+      accountStatus("Could not save the leaderboard setting. Check your connection and try again.");
+    } finally {
+      if (generation === leaderboard.generation) checkbox.disabled = false;
+    }
+  }
+  function initLeaderboard() {
+    document.getElementById("btn-leaderboard").addEventListener("click", openLeaderboard);
+    document.getElementById("btn-account-leaderboard").addEventListener("click", openLeaderboard);
+    document.getElementById("btn-leaderboard-back").addEventListener("click", closeLeaderboard);
+    document.getElementById("btn-leaderboard-refresh").addEventListener("click", () => {
+      loadLeaderboard({ force: true });
+    });
+    for (const button of document.querySelectorAll(".leaderboard-board")) {
+      button.addEventListener("click", () => setLeaderboardBoard(button.dataset.board));
+    }
+    document.getElementById("account-leaderboard-visible").addEventListener("change", (event) => {
+      saveLeaderboardVisibility(event.target.checked);
+    });
+    window.addEventListener("online", () => {
+      leaderboard.cache.delete(leaderboard.board);
+      if (!document.getElementById("screen-leaderboard").hidden) loadLeaderboard();
+    });
+  }
+
   function initAccount() {
     document.getElementById("btn-account").addEventListener("click", openAccount);
     document.getElementById("btn-online-account").addEventListener("click", openAccount);
@@ -631,6 +903,7 @@
         ui.replaysList.replaceChildren();
         ui.replaysStatus.textContent = "Load replays for the current identity.";
         document.getElementById("account-stats-values").replaceChildren();
+        resetLeaderboardState();
         globalThis.DamaPinoyApp.clearOnlineReplay();
         render();
         renderAccount();
@@ -1671,6 +1944,7 @@
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state) synchronize();
     });
+    initLeaderboard();
     initAccount();
   }
 
@@ -1681,6 +1955,7 @@
       getUserId: () => userId, synchronize,
       replayFile, loadReplays, rejoinSaved,
       openAccount, syncAccount, getAccount: () => account,
+      openLeaderboard, loadLeaderboard, getLeaderboard: () => leaderboard,
     };
   }
   globalThis.DamaPinoyAccount = Object.freeze({ isLoggedIn: () => Boolean(account), renderStats: renderAccountStats });

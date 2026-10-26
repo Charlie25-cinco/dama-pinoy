@@ -119,6 +119,7 @@
           <button type="button" id="btn-start" class="btn btn--primary">Start Game</button>
           <button type="button" id="btn-howto" class="btn btn--ghost">How to Play</button>
           <button type="button" id="btn-stats" class="btn btn--ghost">Statistics</button>
+          <button type="button" id="btn-leaderboard" class="btn btn--ghost">Leaderboard</button>
           <button type="button" id="btn-online" class="btn btn--ghost">Online Multiplayer</button>
           <button type="button" id="btn-account" class="btn btn--ghost">Log In / Sign Up</button>
           <button type="button" id="btn-menu-logout" class="btn btn--ghost" hidden>Log Out</button>
@@ -167,6 +168,9 @@
             <input id="account-display-name" class="name-input" maxlength="20" autocomplete="nickname" required>
             <button type="submit" class="btn btn--primary">Save Display Name</button>
           </form>
+          <label class="account-toggle"><input type="checkbox" id="account-leaderboard-visible"> Appear on Leaderboards</label>
+          <p id="account-leaderboard-hint" class="online-hint">Off by default. When on, your display name and verified online record appear on public leaderboards. Your email is never shown. Turning it off hides your entry but keeps your record.</p>
+          <button type="button" id="btn-account-leaderboard" class="btn btn--ghost">View Leaderboards</button>
           <button type="button" id="btn-account-stats" class="btn btn--ghost">Account Statistics</button>
           <button type="button" id="btn-account-replays" class="btn btn--ghost">Online Replays</button>
           <button type="button" id="btn-account-logout" class="btn btn--ghost">Log Out</button>
@@ -501,6 +505,45 @@
           <button type="button" id="btn-stats-back" class="btn btn--ghost">Back to Menu</button>
         </div>
         <p id="stats-local-note" class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
+      </div>
+    </section>
+
+    <section id="screen-leaderboard" class="screen screen--leaderboard" aria-labelledby="leaderboard-heading" hidden>
+      <div class="leaderboard-panel">
+        <p class="eyebrow">Verified online play only</p>
+        <h2 id="leaderboard-heading" tabindex="-1">Leaderboards</h2>
+        <p id="leaderboard-status" role="status" aria-live="polite">Rankings use verified online games. Local and computer games never count.</p>
+        <div class="leaderboard-boards" role="group" aria-label="Leaderboard type">
+          <button type="button" class="leaderboard-board" data-board="wins" aria-pressed="true">Overall Wins</button>
+          <button type="button" class="leaderboard-board" data-board="win_rate" aria-pressed="false">Win Rate</button>
+          <button type="button" class="leaderboard-board" data-board="bo3" aria-pressed="false">Best of 3</button>
+          <button type="button" class="leaderboard-board" data-board="bo5" aria-pressed="false">Best of 5</button>
+          <button type="button" class="leaderboard-board" data-board="bo9" aria-pressed="false">Best of 9</button>
+          <button type="button" class="leaderboard-board" data-board="streak" aria-pressed="false">Current Streak</button>
+        </div>
+        <p id="leaderboard-me" class="leaderboard-me"></p>
+        <p id="leaderboard-empty" class="leaderboard-empty" hidden>No players on the leaderboard yet. Enable “Appear on Leaderboards” in your account settings to join.</p>
+        <div id="leaderboard-table-wrap" class="leaderboard-table-wrap" hidden>
+          <table class="leaderboard-table">
+            <caption class="visually-hidden">Top 50 players for the selected leaderboard</caption>
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Player</th>
+                <th scope="col" id="leaderboard-metric-heading">Wins</th>
+                <th scope="col">Games</th>
+                <th scope="col">Win rate</th>
+                <th scope="col">Last active</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-rows"></tbody>
+          </table>
+        </div>
+        <div class="leaderboard-actions">
+          <button type="button" id="btn-leaderboard-refresh" class="btn btn--primary">Refresh</button>
+          <button type="button" id="btn-leaderboard-back" class="btn btn--ghost">Back to Menu</button>
+        </div>
+        <p class="leaderboard-note">Only completed online games and series recorded by the server are ranked. Guest and local records are never uploaded. Win Rate needs at least 10 completed online games. Leaderboards need an internet connection.</p>
       </div>
     </section>
 

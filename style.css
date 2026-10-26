@@ -469,12 +469,120 @@ body {
 .account-panel > .btn, #account-auth > .btn { width: 100%; margin-top: var(--space-3); }
 .account-stats-values { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
 .account-stats-values dd { margin: 0; font-weight: 700; color: var(--heading); }
+.account-toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-weight: 700;
+  cursor: pointer;
+}
+.account-toggle input { min-width: 22px; min-height: 22px; accent-color: var(--accent); }
+.account-toggle:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
 #account-delete-dialog { width: min(92vw, 560px); padding: var(--space-4); border: 2px solid var(--border);
   border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
 #account-delete-dialog::backdrop { background: rgb(0 0 0 / 65%); }
 #account-profile[hidden], #account-auth[hidden], #account-signup-name[hidden],
 #account-stats[hidden], #account-password[hidden], #account-password-label[hidden],
 #btn-menu-logout[hidden] { display: none; }
+
+/* ---------- Leaderboards ---------- */
+
+.leaderboard-panel {
+  width: min(100%, 860px);
+  margin: var(--space-4) auto;
+  padding: clamp(20px, 4vw, 36px);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card-image);
+  box-shadow: var(--shadow-card);
+  overflow-wrap: anywhere;
+}
+.leaderboard-panel h2 { font-family: var(--font-display); color: var(--heading); }
+.leaderboard-boards { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; }
+.leaderboard-board {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.leaderboard-board:hover { border-color: var(--accent); }
+.leaderboard-board[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-glass);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--heading);
+}
+.leaderboard-board:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.leaderboard-me { margin: var(--space-2) 0; font-weight: 700; color: var(--heading); }
+.leaderboard-empty {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-glass);
+}
+.leaderboard-table-wrap { margin: var(--space-3) 0; }
+.leaderboard-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.leaderboard-table th,
+.leaderboard-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.leaderboard-table th {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.leaderboard-table tbody tr:nth-child(even) { background: var(--surface-glass); }
+.leaderboard-table tbody tr.is-me { outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 700; }
+.leaderboard-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.leaderboard-actions .btn { flex: 1 1 200px; }
+.leaderboard-note { margin: var(--space-3) 0 0; font-size: 0.9rem; color: var(--text-soft); }
+#leaderboard-table-wrap[hidden], #leaderboard-empty[hidden] { display: none; }
+
+@media (max-width: 640px) {
+  .leaderboard-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .leaderboard-table,
+  .leaderboard-table tbody,
+  .leaderboard-table tr,
+  .leaderboard-table td { display: block; width: 100%; }
+  .leaderboard-table tr {
+    margin-bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+  }
+  .leaderboard-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 2px 0;
+    border: 0;
+  }
+  .leaderboard-table td::before { content: attr(data-label); color: var(--text-soft); font-weight: 600; }
+  .leaderboard-table tbody tr:nth-child(even) { background: var(--surface); }
+}
 .online-replays {
   width: min(100%, 980px);
   margin: var(--space-4) auto;
@@ -2269,8 +2377,15 @@ body {
 }
 
 @media (min-width: 600px) and (max-height: 820px) {
-  .title-card .button-row { gap: var(--space-2); }
-  .title-card .button-row .btn { min-height: 44px; padding: 0 var(--space-3); font-size: 0.85rem; }
+  /* Short desktop windows: pack the title actions into an even grid so the
+     card keeps fitting without hiding primary controls. */
+  .title-card .button-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+  .title-card .button-row .btn { min-height: 38px; padding: 0 var(--space-2); font-size: 0.82rem; }
   .title-card {
     padding: 22px 34px;
   }
@@ -2290,6 +2405,7 @@ body {
   }
 
   .lede {
+    max-width: 60ch;
     margin: var(--space-2) auto var(--space-3);
     font-size: 0.92rem;
   }
@@ -2332,6 +2448,9 @@ body {
 }
 
 @media (min-width: 600px) and (max-height: 700px) {
+  .title-card .emblem {
+    display: none;
+  }
   .title-card {
     padding: 14px 34px;
   }
@@ -2346,9 +2465,9 @@ body {
   }
 
   .title-card .button-row .btn {
-    min-height: 40px;
-    padding: 0 var(--space-3);
-    font-size: 0.85rem;
+    min-height: 36px;
+    padding: 0 var(--space-2);
+    font-size: 0.8rem;
   }
 
   .title-facts {

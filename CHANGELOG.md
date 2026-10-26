@@ -2,6 +2,14 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.5.0 — 2026-10-26
+
+- **Added:** Opt-in public **Leaderboards** with six boards — Overall Wins, Win Rate (minimum 10 completed online games), Best of 3/5/9 series wins, and Current Win Streak (longest streak is shown alongside). Each row shows rank, display name, the board metric, games, win rate, and last active. Guests may view boards; only permanent accounts can appear on them.
+- **Added:** **Appear on Leaderboards** account toggle, off by default. Turning it off hides the entry but keeps the verified record; display names are shown and email addresses never are.
+- **Changed:** Leaderboard counters are a server-only projection recomputed from the existing verified-result tables, so local, computer, replay, and client-supplied values can never be ranked, and repeated results cannot double count. Public reads are limited to opted-in rows through RLS and one read-only RPC; only the owner can change their visibility.
+- **Changed:** Refreshed the installed app cache for the leaderboard screen and account toggle.
+- **Fixed:** Kept the title actions usable in short desktop windows, rejected outdated board/account responses, and displayed longest streak alongside the current streak.
+
 ## 2.4.2 — 2026-10-26
 
 - **Fixed:** An unfinished password reset no longer turns into a normal login. A verified recovery session now stays a pending reset: reopening the app in any tab returns to **Set New Password** instead of the lobby, the normal Log Out control stays hidden, and **Back to Menu** or **Cancel Reset** signs the recovery session out. Requesting a code alone still creates no session.
