@@ -464,6 +464,7 @@ body {
 }
 .account-fields .name-input:hover { border-color: var(--accent); }
 .account-fields .name-input:focus { border-color: var(--accent); }
+.account-fields input[hidden] { display: none; }
 .account-tabs { display: flex; gap: var(--space-2); margin: var(--space-3) 0; }
 .account-tabs button { flex: 1; min-height: 44px; border: 2px solid var(--border);
   border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }

@@ -42,6 +42,133 @@
   let authSubscription = null;
   let authGeneration = 0;
   let accountReturnScreen = "screen-title";
+  const authCallback = captureAuthCallback();
+  let callbackPending = authCallback.present;
+  let callbackPromise = null;
+  let callbackNotice = null;
+
+  function captureAuthCallback() {
+    const url = new URL(location.href);
+    const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+    const query = url.searchParams;
+    const has = (key) => query.has(key) || hash.has(key);
+    return { present: ["code", "error", "error_code", "error_description", "access_token", "refresh_token", "token_hash"]
+      .some(has), code: query.get("code"), error: has("error") || has("error_code") || has("error_description"),
+      implicit: has("access_token") || has("refresh_token") || has("token_hash") };
+  }
+  function clearAuthCallbackURL() {
+    const url = new URL(location.href);
+    const keys = ["code", "error", "error_code", "error_description", "access_token", "refresh_token",
+      "token", "token_hash", "type", "expires_at", "expires_in", "token_type", "provider_token", "provider_refresh_token"];
+    for (const key of keys) url.searchParams.delete(key);
+    const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+    if (keys.some((key) => hash.has(key))) {
+      for (const key of keys) hash.delete(key);
+      url.hash = hash.toString();
+    }
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }
+  function authStorageKey() {
+    return "sb-" + new URL(config().supabaseUrl).hostname.split(".")[0] + "-auth-token";
+  }
+  function rememberAuthIntent(kind, id = null) {
+    setStored("damaPinoy.authIntent", JSON.stringify({ kind, userId: id, at: Date.now() }));
+  }
+  function readAuthIntent() {
+    try {
+      const value = JSON.parse(getStored("damaPinoy.authIntent"));
+      return value && ["magic", "recovery", "upgrade"].includes(value.kind) &&
+        Number.isFinite(value.at) && Date.now() - value.at < 3600000 ? value : null;
+    } catch (error) { return null; }
+  }
+  function setRecovery(enabled, id = null) {
+    recovery = enabled;
+    try {
+      if (enabled && id) sessionStorage.setItem("damaPinoy.recovery", JSON.stringify({ userId: id, at: Date.now() }));
+      else sessionStorage.removeItem("damaPinoy.recovery");
+    } catch (error) { /* The in-memory recovery flow still works. */ }
+  }
+  function restoreRecovery(session) {
+    try {
+      const value = JSON.parse(sessionStorage.getItem("damaPinoy.recovery"));
+      if (value && value.userId === session?.user?.id && Date.now() - value.at < 3600000) {
+        recovery = true;
+      } else if (value) setRecovery(false);
+    } catch (error) { /* Optional session storage. */ }
+  }
+  function finishAuthCallback() {
+    if (!authCallback.present) return Promise.resolve(null);
+    if (callbackPromise) return callbackPromise;
+    // Own the exchange: SDK auto-detection must not consume this same code.
+    callbackPromise = (async () => {
+      let previous = null;
+      let service = null;
+      try {
+        clearAuthCallbackURL();
+        secureAccountContext();
+        if (authCallback.error) throw new Error("This email link is expired, already used, or was rejected. Request one new link and open only the latest email in the same browser.");
+        if (authCallback.implicit || !authCallback.code || authCallback.code.length > 4096) {
+          throw new Error("This email link does not contain a compatible sign-in code. Request a new link from this browser. If it repeats, the email template/redirect must be checked.");
+        }
+        if (!getStored(authStorageKey() + "-code-verifier")) {
+          throw new Error("This browser has no matching sign-in request. Open the link in the same browser/device where you requested it (not the email app's built-in browser), or request a fresh link here. Do not clear site data.");
+        }
+        const intent = readAuthIntent();
+        service = await loadClient();
+        previous = (await service.auth.getSession()).data.session;
+        const exchanged = await service.auth.exchangeCodeForSession(authCallback.code);
+        if (exchanged.error || !exchanged.data?.session) {
+          throw new Error("The email link could not be completed. It may be expired, already used, or replaced by a newer request. Request one new link from this browser and try the latest email.");
+        }
+        const session = exchanged.data.session;
+        const verified = await service.auth.getUser(session.access_token);
+        if (verified.error || !verified.data?.user || verified.data.user.is_anonymous === true) {
+          throw new Error("The link did not produce a confirmed account session. Request a new confirmation link or log in after confirming your email.");
+        }
+        const expected = intent?.kind === "upgrade" ? intent.userId : hasRoomIdentity()
+          ? getStored("damaPinoy.onlineRoomOwner") || previous?.user?.id || getStored(storage.guest) : null;
+        if (expected && expected !== verified.data.user.id) {
+          if (previous) await service.auth.setSession({ access_token: previous.access_token, refresh_token: previous.refresh_token });
+          else await service.auth.signOut({ scope: "local" });
+          throw new Error("This link belongs to a different identity. Your saved room was not transferred. Leave that room before signing into a different account.");
+        }
+        const isRecovery = exchanged.data.redirectType === "PASSWORD_RECOVERY";
+        setRecovery(isRecovery, isRecovery ? verified.data.user.id : null);
+        reauth = false;
+        return { kind: isRecovery ? "recovery" : intent?.kind === "upgrade" ? "upgrade" : "magic" };
+      } catch (error) {
+        callbackNotice = error.message || "Could not complete the email link. Request a fresh link in the same browser.";
+        return { error: true };
+      } finally {
+        callbackPending = false;
+        clearStored("damaPinoy.authIntent");
+      }
+    })();
+    return callbackPromise;
+  }
+  async function restoreAccountAtStartup() {
+    const result = await finishAuthCallback();
+    try {
+      await syncAccount();
+      if (result && !result.error) {
+        if (!account) throw new Error("The email was processed, but the account profile could not be restored. Please log in again.");
+        setAccountMode("login");
+        renderAccount();
+        callbackNotice = recovery ? "Recovery link accepted. Enter and save your new password below." :
+          result.kind === "upgrade" ? "Email confirmed. Your guest identity was upgraded and you are now logged in. Your room and local data were preserved." :
+            "Magic link accepted. You are now logged in.";
+      }
+      if (recovery) {
+        globalThis.DamaPinoyApp.showScreen("screen-account");
+        setAccountMode("login");
+        renderAccount();
+        callbackNotice = callbackNotice || "Enter and save your new password to finish recovery.";
+      }
+    } catch (error) {
+      callbackNotice = callbackNotice || error.message || "Could not restore the account. Please log in again.";
+    }
+    if (callbackNotice) accountStatus(callbackNotice);
+  }
 
   function accountStatus(text) { document.getElementById("account-status").textContent = text; }
   function secureAccountContext() {
@@ -98,6 +225,9 @@
     document.getElementById("account-password-label").hidden = password.hidden;
     document.getElementById("account-password-label").textContent = recovery ? "New password (at least 8 characters)" : "Password";
     document.getElementById("account-email").required = !recovery;
+    document.getElementById("account-email").disabled = recovery;
+    document.getElementById("account-email").hidden = recovery;
+    document.getElementById("account-email-label").hidden = recovery;
     document.getElementById("account-signup-name").hidden = mode !== "signup";
     document.getElementById("account-new-name").required = mode === "signup";
     document.getElementById("account-auth-panel").setAttribute("aria-labelledby",
@@ -111,10 +241,12 @@
       "Account statistics are online-only. Guest/local statistics are never silently merged.";
   }
   async function syncAccount() {
+    await finishAuthCallback();
     const generation = ++authGeneration;
     const service = await loadClient();
     const session = (await service.auth.getSession()).data.session;
     if (generation !== authGeneration) return;
+    restoreRecovery(session);
     const previous = userId;
     const nextId = session?.user?.id || null;
     if (previous && previous !== nextId) {
@@ -148,6 +280,11 @@
       if (generation === authGeneration) throw error;
     } finally {
       if (generation === authGeneration) {
+        if (recovery) {
+          setAccountMode("login");
+          globalThis.DamaPinoyApp.showScreen("screen-account");
+          accountStatus(callbackNotice || "Enter and save your new password to finish recovery.");
+        }
         renderAccount();
         globalThis.DamaPinoyApp.refreshStats();
       }
@@ -167,8 +304,9 @@
     try {
       secureAccountContext();
       await syncAccount();
-      accountStatus(account ? "Your account identity and online records follow you across devices." :
-        "Guest play is available. Sign up to keep your identity across devices; local records stay separate.");
+      accountStatus(callbackNotice || (recovery ? "Enter and save your new password to finish recovery." :
+        account ? "Your account identity and online records follow you across devices." :
+          "Guest play is available. Sign up to keep your identity across devices; local records stay separate."));
     } catch (error) { accountStatus(error.message || "Could not restore account. Please log in again."); }
     finally {
       accountBusy = false;
@@ -176,7 +314,9 @@
     }
   }
   async function accountAction(work) {
+    if (callbackPending) { accountStatus("Completing your email link. Please wait…"); return; }
     if (accountBusy || busy) return;
+    callbackNotice = null;
     accountBusy = true;
     const controls = document.querySelectorAll("#screen-account button,#account-delete-dialog button");
     controls.forEach((button) => { button.disabled = true; });
@@ -199,7 +339,7 @@
       if (recovery) {
         result = await service.auth.updateUser({ password });
         if (result.error) throw new Error("Could not change password. Reopen the reset link or request a new one.");
-        recovery = false;
+        setRecovery(false);
         setAccountMode("login");
         accountStatus("Password updated. Keep it private.");
       } else if (accountMode === "signup") {
@@ -211,16 +351,19 @@
         result = await service.auth.updateUser({ email, ...(passwordless ? {} : { password }),
           data: { display_name: name } }, { emailRedirectTo: authRedirect() });
         if (result.error) throw new Error("Could not upgrade guest. Check the email/password or log into the existing account after leaving your room.");
+        rememberAuthIntent("upgrade", current.user.id);
         accountStatus("Confirmation email requested. Open its link in this browser to finish upgrading the same guest identity. Your current room and local data are preserved.");
       } else if (accountMode === "magic") {
         requireIdentitySwitchAllowed();
         result = await service.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: authRedirect() } });
         if (result.error) throw new Error("Could not request a magic link. Try later or use email/password.");
+        rememberAuthIntent("magic");
         accountStatus("If an account can use this email, a login link has been requested. Check your inbox and spam folder.");
       } else if (accountMode === "reset") {
         requireIdentitySwitchAllowed();
         result = await service.auth.resetPasswordForEmail(email, { redirectTo: authRedirect() });
         if (result.error) throw new Error("Could not request password reset. Try again later.");
+        rememberAuthIntent("recovery");
         accountStatus("If an account uses this email, a password reset link has been requested.");
       } else {
         if (hasRoomIdentity()) {
@@ -253,7 +396,8 @@
       const result = await service.auth.signOut({ scope: "local" });
       if (result.error) throw new Error("Logout failed. Check your connection and retry.");
       clearStored("damaPinoy.accountExpected");
-      recovery = false;
+      clearStored("damaPinoy.authIntent");
+      setRecovery(false);
       await syncAccount();
       accountStatus("Logged out. Local/guest statistics and preferences are unchanged. A new guest identity will be created when needed.");
     });
@@ -301,19 +445,20 @@
     document.getElementById("account-form").addEventListener("submit", submitAccount);
     for (const [index, mode] of ["login", "signup", "magic"].entries()) {
       const tab = document.getElementById("account-tab-" + mode);
-      tab.addEventListener("click", () => { recovery = false; setAccountMode(mode); renderAccount(); });
+      tab.addEventListener("click", () => { setRecovery(false); setAccountMode(mode); renderAccount(); });
       tab.addEventListener("keydown", (event) => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const target = event.key === "Home" ? 0 : event.key === "End" ? 2 :
           (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
         const next = ["login", "signup", "magic"][target];
+        setRecovery(false);
         setAccountMode(next);
         document.getElementById("account-tab-" + next).focus();
       });
     }
     document.getElementById("account-signup-passwordless").addEventListener("change", () => setAccountMode("signup"));
-    document.getElementById("btn-account-reset").addEventListener("click", () => { recovery = false; setAccountMode("reset"); });
+    document.getElementById("btn-account-reset").addEventListener("click", () => { setRecovery(false); setAccountMode("reset"); });
     document.getElementById("account-profile-form").addEventListener("submit", (event) => {
       event.preventDefault();
       accountAction(async () => {
@@ -329,7 +474,7 @@
     document.getElementById("btn-account-logout").addEventListener("click", logoutAccount);
     document.getElementById("btn-account-reauth").addEventListener("click", () => {
       if (!account || accountBusy) return;
-      reauth = true; recovery = false;
+      reauth = true; setRecovery(false);
       document.getElementById("account-email").value = account?.email || "";
       setAccountMode("login");
       renderAccount();
@@ -367,9 +512,10 @@
         clearStored(storage.room);
         clearStored("damaPinoy.onlineRoomCode");
         clearStored("damaPinoy.accountExpected");
+        clearStored("damaPinoy.authIntent");
         // Local signout also clears an already-invalid token after server deletion.
         await client.auth.signOut({ scope: "local" });
-        account = null; userId = null; recovery = false; lastStats = null;
+        account = null; userId = null; setRecovery(false); lastStats = null;
         ui.replaysList.replaceChildren();
         ui.replaysStatus.textContent = "Load replays for the current identity.";
         document.getElementById("account-stats-values").replaceChildren();
@@ -387,10 +533,16 @@
       const ref = new URL(config().supabaseUrl).hostname.split(".")[0];
       storedSession = Boolean(getStored("sb-" + ref + "-auth-token"));
     } catch (error) { /* Account setup may be unavailable; local play is unaffected. */ }
-    const callback = new URLSearchParams(location.search).has("code") || /(?:access_token|type=recovery|error_description)=/.test(location.hash);
-    if (isOnline() && (storedSession || callback)) {
-      if (callback) globalThis.DamaPinoyApp.showScreen("screen-account");
-      syncAccount().catch(() => accountStatus("Could not restore session. Log in again or continue as guest. Local data is unchanged."));
+    const pendingIntent = readAuthIntent();
+    if (authCallback.present || isOnline() && (storedSession || pendingIntent)) {
+      if (authCallback.present) {
+        globalThis.DamaPinoyApp.showScreen("screen-account");
+        accountStatus("Completing your email link…");
+      } else if (pendingIntent) {
+        globalThis.DamaPinoyApp.showScreen("screen-account");
+        callbackNotice = "Your email link has not been completed yet. Open the newest verification link in the same browser. If clicking the email only returns here, its template/redirect may be missing the sign-in code.";
+      }
+      restoreAccountAtStartup();
     }
   }
 
@@ -466,11 +618,12 @@
         if (!globalThis.supabase?.createClient) throw new Error("Could not load the online service.");
         client = globalThis.supabase.createClient(settings.supabaseUrl.replace(/\/$/, ""),
           settings.publishableKey, { auth: { persistSession: true,
-            autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } });
+            autoRefreshToken: true, detectSessionInUrl: false, flowType: "pkce" } });
         if (client.auth.onAuthStateChange && !authSubscription) {
-          authSubscription = client.auth.onAuthStateChange((event) => {
+          authSubscription = client.auth.onAuthStateChange((event, session) => {
+            if (callbackPending || event === "INITIAL_SESSION") return;
             if (event === "PASSWORD_RECOVERY") {
-              recovery = true;
+              setRecovery(true, session?.user?.id);
               globalThis.DamaPinoyApp.showScreen("screen-account");
               setAccountMode("login");
               accountStatus("Recovery link accepted. Enter a new password.");
@@ -490,6 +643,7 @@
   function ensureGuest() {
     if (guestPromise) return guestPromise;
     guestPromise = (async function () {
+      await finishAuthCallback();
       const service = await loadClient();
       let { data, error } = await service.auth.getSession();
       if (error) throw new Error("Could not restore your guest session.");

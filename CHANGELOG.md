@@ -2,6 +2,12 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.3.2 — 2026-10-26
+
+- **Fixed:** Email callbacks now explicitly exchange PKCE codes once and verify the returned account instead of silently falling back to the login screen. Missing-browser verifiers, expired/reused links, provider errors, and incompatible links display actionable status text.
+- **Fixed:** Password-recovery callbacks retain their recovery marker and show the new-password form, including after a same-tab refresh. Guest upgrade and saved-room identity checks remain enforced.
+- **Changed:** Callback credentials are removed from the address bar before SDK loading, referrers are suppressed, and the installed app cache is refreshed.
+
 ## 2.3.1 — 2026-10-26
 
 - **Fixed:** Scoped compact desktop player-name positioning to player cards so account email/password fields no longer overlap. Account inputs now have visible theme-consistent surfaces, borders, and focus feedback.
