@@ -150,6 +150,8 @@
               <input id="account-email" class="name-input" type="email" autocomplete="email" maxlength="254" required>
               <label id="account-password-label" for="account-password">Password</label>
               <input id="account-password" class="name-input" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+              <label id="account-reset-code-label" for="account-reset-code" hidden>Reset code from your email</label>
+              <input id="account-reset-code" class="name-input" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" aria-describedby="account-auth-hint" hidden disabled>
               <div id="account-signup-name" class="account-fields" hidden>
                 <label for="account-new-name">Display name (1–20 characters)</label>
                 <input id="account-new-name" class="name-input" maxlength="20" autocomplete="nickname">
@@ -157,9 +159,11 @@
               </div>
               <p id="account-auth-hint" class="online-hint">Use your existing account. Leave any current room before switching identities.</p>
               <button id="btn-account-submit" class="btn btn--primary" type="submit">Log In</button>
+              <button id="btn-account-have-code" class="btn btn--ghost" type="button" hidden>I Already Have a Reset Code</button>
+              <button id="btn-account-resend" class="btn btn--ghost" type="button" hidden>Resend Reset Code</button>
             </div>
           </form>
-          <button type="button" id="btn-account-reset" class="btn btn--ghost">Reset Password by Email</button>
+          <button type="button" id="btn-account-reset" class="btn btn--ghost">Reset Password with Email Code</button>
           <button type="button" id="btn-account-guest" class="btn btn--ghost">Continue as Guest</button>
         </div>
         <div id="account-profile" class="account-fields" hidden>

@@ -2,6 +2,12 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.4.0 — 2026-10-26
+
+- **Added:** Email OTP password reset: request/resend a code, verify it, then save a new password. Codes can be entered on another browser/device without a matching PKCE verifier.
+- **Changed:** Reset verification uses a non-persisted client before installing the verified recovery session; active/saved rooms still block identity switching. Signup and magic-link login retain PKCE. Reset emails require the Supabase `{{ .Token }}` template.
+- **Changed:** Refreshed the installed app cache for the reset-code UI.
+
 ## 2.3.2 — 2026-10-26
 
 - **Fixed:** Email callbacks now explicitly exchange PKCE codes once and verify the returned account instead of silently falling back to the login screen. Missing-browser verifiers, expired/reused links, provider errors, and incompatible links display actionable status text.

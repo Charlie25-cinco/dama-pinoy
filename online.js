@@ -36,6 +36,8 @@
   let accountMode = "login";
   let accountBusy = false;
   let recovery = false;
+  let recoveryVerifying = false;
+  let resetNextSendAt = 0;
   let reauth = false;
   let statsLoading = false;
   let lastStats = null;
@@ -217,7 +219,7 @@
       tab.tabIndex = choice === mode ? 0 : -1;
     }
     const password = document.getElementById("account-password");
-    password.hidden = mode === "magic" || mode === "reset" ||
+    password.hidden = mode === "magic" || mode === "reset" || mode === "resetVerify" ||
       mode === "signup" && document.getElementById("account-signup-passwordless").checked;
     password.required = !password.hidden;
     password.autocomplete = mode === "signup" || recovery ? "new-password" : "current-password";
@@ -228,17 +230,89 @@
     document.getElementById("account-email").disabled = recovery;
     document.getElementById("account-email").hidden = recovery;
     document.getElementById("account-email-label").hidden = recovery;
+    const otp = document.getElementById("account-reset-code");
+    otp.hidden = mode !== "resetVerify" || recovery;
+    otp.required = !otp.hidden;
+    otp.disabled = otp.hidden;
+    otp.value = "";
+    document.getElementById("account-reset-code-label").hidden = otp.hidden;
+    document.getElementById("btn-account-have-code").hidden = mode !== "reset" || recovery;
+    document.getElementById("btn-account-resend").hidden = mode !== "resetVerify" || recovery;
+    updateResetControls();
     document.getElementById("account-signup-name").hidden = mode !== "signup";
     document.getElementById("account-new-name").required = mode === "signup";
     document.getElementById("account-auth-panel").setAttribute("aria-labelledby",
-      "account-tab-" + (["reset"].includes(mode) ? "login" : mode));
+      "account-tab-" + (["reset", "resetVerify"].includes(mode) ? "login" : mode));
     document.getElementById("btn-account-submit").textContent = recovery ? "Save New Password" :
       mode === "signup" ? "Create / Upgrade Account" : mode === "magic" ? "Send Magic Link" :
-      mode === "reset" ? "Send Password Reset" : "Log In";
+      mode === "reset" ? "Send Reset Code" : mode === "resetVerify" ? "Verify Reset Code" : "Log In";
     document.getElementById("account-auth-hint").textContent = recovery ? "Choose a new password for the recovered account." :
       mode === "signup" ? "Existing guests keep their Auth identity, room, replays, and local data. Confirm your email to complete the upgrade." :
       mode === "magic" ? "Passwordless login for an existing account. To create/upgrade an account without a password, use Sign Up and select Magic Link below." :
+      mode === "reset" || mode === "resetVerify" ? "Enter the code from your reset email here. You can read the email on another browser or device. Never share the code." :
       "Account statistics are online-only. Guest/local statistics are never silently merged.";
+  }
+  function updateResetControls() {
+    const coolingDown = Date.now() < resetNextSendAt;
+    document.getElementById("btn-account-resend").disabled = accountBusy || coolingDown;
+    document.getElementById("btn-account-submit").disabled = accountBusy || accountMode === "reset" && coolingDown;
+  }
+  function resetClient() {
+    // Recovery OTPs are verified in memory before replacing the main identity.
+    // A reset request must not overwrite a pending signup/magic PKCE verifier.
+    return globalThis.supabase.createClient(config().supabaseUrl, config().publishableKey,
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+        flowType: "pkce", storageKey: "dama-password-reset-otp" } });
+  }
+  async function sendResetCode(email) {
+    requireIdentitySwitchAllowed();
+    if (Date.now() < resetNextSendAt) throw new Error("Please wait one minute between reset-code requests, then try again.");
+    accountStatus("Requesting your reset code…");
+    const result = await resetClient().auth.resetPasswordForEmail(email, { redirectTo: authRedirect() });
+    if (result.error) throw new Error(result.error.status === 429 ?
+      "Too many reset requests. Wait before requesting another code." : "Could not request a reset code. Wait a moment and try again.");
+    resetNextSendAt = Date.now() + 60000;
+    setTimeout(updateResetControls, 60100);
+    setAccountMode("resetVerify");
+    accountStatus("If an account uses this email, a reset code has been requested. Enter the newest code below. You can resend after one minute.");
+    document.getElementById("account-reset-code").focus();
+  }
+  async function verifyResetCode(service, email) {
+    requireIdentitySwitchAllowed();
+    const token = document.getElementById("account-reset-code").value.trim();
+    if (!/^[0-9]{6,10}$/.test(token)) throw new Error("Enter the complete numeric code from your latest reset email.");
+    accountStatus("Verifying your reset code…");
+    const generation = authGeneration;
+    const checker = resetClient();
+    const checked = await checker.auth.verifyOtp({ email, token, type: "recovery" });
+    if (checked.error || !checked.data?.session) throw new Error(checked.error?.status === 429 ?
+      "Too many verification attempts. Wait before trying again." : "The reset code is invalid, expired, or already used. Try the newest email or request a new code.");
+    const session = checked.data.session;
+    let installed = false;
+    try {
+      const verified = await checker.auth.getUser(session.access_token);
+      if (verified.error || !verified.data?.user || verified.data.user.is_anonymous === true ||
+          verified.data.user.email?.toLowerCase() !== email.toLowerCase()) {
+        throw new Error("Could not verify the recovery account. Request a fresh reset code.");
+      }
+      requireIdentitySwitchAllowed();
+      if (generation !== authGeneration) throw new Error("Your account session changed while verifying. Start password reset again.");
+      recoveryVerifying = true;
+      const result = await service.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+      if (result.error || result.data?.session?.user?.id !== verified.data.user.id) {
+        throw new Error("Could not restore the recovery session. Request a fresh reset code.");
+      }
+      installed = true;
+      clearStored("damaPinoy.authIntent");
+      setRecovery(true, verified.data.user.id);
+      reauth = false;
+      setAccountMode("login");
+      accountStatus("Reset code verified. Enter and save your new password below.");
+      document.getElementById("account-password").focus();
+    } finally {
+      recoveryVerifying = false;
+      if (!installed) await checker.auth.signOut({ scope: "local" });
+    }
   }
   async function syncAccount() {
     await finishAuthCallback();
@@ -311,6 +385,7 @@
     finally {
       accountBusy = false;
       controls.forEach((button) => { button.disabled = false; });
+      updateResetControls();
     }
   }
   async function accountAction(work) {
@@ -324,8 +399,10 @@
     catch (error) { accountStatus(error.message || "Account action failed. Please try again."); }
     finally {
       document.getElementById("account-password").value = "";
+      document.getElementById("account-reset-code").value = "";
       accountBusy = false;
       controls.forEach((button) => { button.disabled = false; });
+      updateResetControls();
       renderAccount();
     }
   }
@@ -338,7 +415,7 @@
       let result;
       if (recovery) {
         result = await service.auth.updateUser({ password });
-        if (result.error) throw new Error("Could not change password. Reopen the reset link or request a new one.");
+        if (result.error) throw new Error("Could not change password. Check your connection or request a new reset code.");
         setRecovery(false);
         setAccountMode("login");
         accountStatus("Password updated. Keep it private.");
@@ -360,11 +437,9 @@
         rememberAuthIntent("magic");
         accountStatus("If an account can use this email, a login link has been requested. Check your inbox and spam folder.");
       } else if (accountMode === "reset") {
-        requireIdentitySwitchAllowed();
-        result = await service.auth.resetPasswordForEmail(email, { redirectTo: authRedirect() });
-        if (result.error) throw new Error("Could not request password reset. Try again later.");
-        rememberAuthIntent("recovery");
-        accountStatus("If an account uses this email, a password reset link has been requested.");
+        await sendResetCode(email);
+      } else if (accountMode === "resetVerify") {
+        await verifyResetCode(service, email);
       } else {
         if (hasRoomIdentity()) {
           // Authenticate in isolation first: an expired SAME identity may resume
@@ -459,6 +534,18 @@
     }
     document.getElementById("account-signup-passwordless").addEventListener("change", () => setAccountMode("signup"));
     document.getElementById("btn-account-reset").addEventListener("click", () => { setRecovery(false); setAccountMode("reset"); });
+    document.getElementById("btn-account-have-code").addEventListener("click", () => {
+      setAccountMode("resetVerify");
+      accountStatus("Enter your account email and the newest reset code. A code requested on another browser/device also works here.");
+      document.getElementById("account-reset-code").focus();
+    });
+    document.getElementById("btn-account-resend").addEventListener("click", () => {
+      if (!document.getElementById("account-email").reportValidity()) return;
+      accountAction(async () => {
+        await loadClient();
+        await sendResetCode(document.getElementById("account-email").value.trim());
+      });
+    });
     document.getElementById("account-profile-form").addEventListener("submit", (event) => {
       event.preventDefault();
       accountAction(async () => {
@@ -621,7 +708,7 @@
             autoRefreshToken: true, detectSessionInUrl: false, flowType: "pkce" } });
         if (client.auth.onAuthStateChange && !authSubscription) {
           authSubscription = client.auth.onAuthStateChange((event, session) => {
-            if (callbackPending || event === "INITIAL_SESSION") return;
+            if (callbackPending || recoveryVerifying || event === "INITIAL_SESSION") return;
             if (event === "PASSWORD_RECOVERY") {
               setRecovery(true, session?.user?.id);
               globalThis.DamaPinoyApp.showScreen("screen-account");
