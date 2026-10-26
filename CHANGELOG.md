@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.4.1 — 2026-10-26
+
+- **Fixed:** Simplified account access to email/password Log In, Create Account, and Forgot Password. Removed the magic-link request, passwordless-signup checkbox, and redundant reset/guest choices from the form.
+- **Changed:** Password reset now presents one guided email → code → new-password flow; resend appears only at the code step. Existing account sessions and previously issued email callbacks remain compatible. Refreshed the installed app cache.
+
 ## 2.4.0 — 2026-10-26
 
 - **Added:** Email OTP password reset: request/resend a code, verify it, then save a new password. Codes can be entered on another browser/device without a matching PKCE verifier.

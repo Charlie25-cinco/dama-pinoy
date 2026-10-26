@@ -465,13 +465,7 @@ body {
 .account-fields .name-input:hover { border-color: var(--accent); }
 .account-fields .name-input:focus { border-color: var(--accent); }
 .account-fields input[hidden] { display: none; }
-.account-tabs { display: flex; gap: var(--space-2); margin: var(--space-3) 0; }
-.account-tabs button { flex: 1; min-height: 44px; border: 2px solid var(--border);
-  border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
-.account-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; background: var(--surface-glass); }
-.account-tabs button:focus-visible { outline: 3px solid var(--focus-light); outline-offset: 2px; }
-.account-check { display: flex; gap: var(--space-2); align-items: start; }
-.account-check input { min-width: 20px; min-height: 20px; }
+#account-auth .btn[hidden] { display: none; }
 .account-panel > .btn, #account-auth > .btn { width: 100%; margin-top: var(--space-3); }
 .account-stats-values { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
 .account-stats-values dd { margin: 0; font-weight: 700; color: var(--heading); }

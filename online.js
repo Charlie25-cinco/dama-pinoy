@@ -192,7 +192,7 @@
   }
   function hasRoomIdentity() { return Boolean(state && state.room.status !== "closed" || getStored(storage.room)); }
   function requireIdentitySwitchAllowed() {
-    if (hasRoomIdentity()) throw new Error("Leave your saved/current online room first. Sign Up can upgrade a guest without leaving; logging into a different account cannot transfer that seat.");
+    if (hasRoomIdentity()) throw new Error("Leave your saved/current online room first. Create Account can upgrade a guest without leaving; logging into a different account cannot transfer that seat.");
   }
   function renderAccount() {
     const signedIn = Boolean(account);
@@ -204,6 +204,7 @@
     document.getElementById("account-auth").hidden = signedIn && !recovery && !reauth;
     document.getElementById("account-profile").hidden = !signedIn || recovery || reauth;
     document.getElementById("btn-menu-logout").hidden = !signedIn;
+    renderAccountHeading();
     if (signedIn) {
       document.getElementById("account-email-display").textContent = account.email || "Email confirmation pending";
       document.getElementById("account-display-name").value = account.displayName;
@@ -213,14 +214,13 @@
   }
   function setAccountMode(mode) {
     accountMode = mode;
-    for (const choice of ["login", "signup", "magic"]) {
-      const tab = document.getElementById("account-tab-" + choice);
-      tab.setAttribute("aria-selected", String(choice === mode));
-      tab.tabIndex = choice === mode ? 0 : -1;
-    }
+    const login = mode === "login" && !recovery && !reauth;
+    document.getElementById("account-tab-signup").hidden = !login;
+    document.getElementById("btn-account-reset").hidden = !login;
+    document.getElementById("account-tab-login").hidden = login || recovery;
+    document.getElementById("account-tab-login").textContent = reauth ? "Cancel" : "Back to Log In";
     const password = document.getElementById("account-password");
-    password.hidden = mode === "magic" || mode === "reset" || mode === "resetVerify" ||
-      mode === "signup" && document.getElementById("account-signup-passwordless").checked;
+    password.hidden = mode === "reset" || mode === "resetVerify";
     password.required = !password.hidden;
     password.autocomplete = mode === "signup" || recovery ? "new-password" : "current-password";
     password.minLength = mode === "login" && !recovery ? 1 : 8;
@@ -236,21 +236,25 @@
     otp.disabled = otp.hidden;
     otp.value = "";
     document.getElementById("account-reset-code-label").hidden = otp.hidden;
-    document.getElementById("btn-account-have-code").hidden = mode !== "reset" || recovery;
     document.getElementById("btn-account-resend").hidden = mode !== "resetVerify" || recovery;
     updateResetControls();
     document.getElementById("account-signup-name").hidden = mode !== "signup";
     document.getElementById("account-new-name").required = mode === "signup";
-    document.getElementById("account-auth-panel").setAttribute("aria-labelledby",
-      "account-tab-" + (["reset", "resetVerify"].includes(mode) ? "login" : mode));
     document.getElementById("btn-account-submit").textContent = recovery ? "Save New Password" :
-      mode === "signup" ? "Create / Upgrade Account" : mode === "magic" ? "Send Magic Link" :
+      mode === "signup" ? "Create Account" :
       mode === "reset" ? "Send Reset Code" : mode === "resetVerify" ? "Verify Reset Code" : "Log In";
     document.getElementById("account-auth-hint").textContent = recovery ? "Choose a new password for the recovered account." :
-      mode === "signup" ? "Existing guests keep their Auth identity, room, replays, and local data. Confirm your email to complete the upgrade." :
-      mode === "magic" ? "Passwordless login for an existing account. To create/upgrade an account without a password, use Sign Up and select Magic Link below." :
-      mode === "reset" || mode === "resetVerify" ? "Enter the code from your reset email here. You can read the email on another browser or device. Never share the code." :
-      "Account statistics are online-only. Guest/local statistics are never silently merged.";
+      mode === "signup" ? "Choose a password with at least 8 characters. Confirm your email in this browser. Your guest identity, room, and local data are kept." :
+      mode === "reset" ? "We will email you a code to reset your password." :
+      mode === "resetVerify" ? "Enter the code from your newest reset email. You can read the email on any device. Never share the code." :
+      "Enter your account email and password.";
+    renderAccountHeading();
+  }
+  function renderAccountHeading() {
+    document.getElementById("account-heading").textContent = recovery ? "Set New Password" :
+      reauth ? "Confirm Your Identity" : account ? "Your Account" :
+      accountMode === "signup" ? "Create Account" : accountMode === "reset" ? "Reset Password" :
+      accountMode === "resetVerify" ? "Enter Reset Code" : "Log In";
   }
   function updateResetControls() {
     const coolingDown = Date.now() < resetNextSendAt;
@@ -424,18 +428,11 @@
         await ensureGuest();
         const current = (await service.auth.getSession()).data.session;
         if (current.user.is_anonymous !== true) throw new Error("You already have an account. Use Account to edit it.");
-        const passwordless = document.getElementById("account-signup-passwordless").checked;
-        result = await service.auth.updateUser({ email, ...(passwordless ? {} : { password }),
+        result = await service.auth.updateUser({ email, password,
           data: { display_name: name } }, { emailRedirectTo: authRedirect() });
         if (result.error) throw new Error("Could not upgrade guest. Check the email/password or log into the existing account after leaving your room.");
         rememberAuthIntent("upgrade", current.user.id);
         accountStatus("Confirmation email requested. Open its link in this browser to finish upgrading the same guest identity. Your current room and local data are preserved.");
-      } else if (accountMode === "magic") {
-        requireIdentitySwitchAllowed();
-        result = await service.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: authRedirect() } });
-        if (result.error) throw new Error("Could not request a magic link. Try later or use email/password.");
-        rememberAuthIntent("magic");
-        accountStatus("If an account can use this email, a login link has been requested. Check your inbox and spam folder.");
       } else if (accountMode === "reset") {
         await sendResetCode(email);
       } else if (accountMode === "resetVerify") {
@@ -473,6 +470,7 @@
       clearStored("damaPinoy.accountExpected");
       clearStored("damaPinoy.authIntent");
       setRecovery(false);
+      setAccountMode("login");
       await syncAccount();
       accountStatus("Logged out. Local/guest statistics and preferences are unchanged. A new guest identity will be created when needed.");
     });
@@ -518,26 +516,22 @@
     document.getElementById("btn-online-account").addEventListener("click", openAccount);
     document.getElementById("btn-account-back").addEventListener("click", () => globalThis.DamaPinoyApp.showScreen(accountReturnScreen));
     document.getElementById("account-form").addEventListener("submit", submitAccount);
-    for (const [index, mode] of ["login", "signup", "magic"].entries()) {
-      const tab = document.getElementById("account-tab-" + mode);
-      tab.addEventListener("click", () => { setRecovery(false); setAccountMode(mode); renderAccount(); });
-      tab.addEventListener("keydown", (event) => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const target = event.key === "Home" ? 0 : event.key === "End" ? 2 :
-          (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
-        const next = ["login", "signup", "magic"][target];
+    for (const mode of ["login", "signup"]) {
+      document.getElementById("account-tab-" + mode).addEventListener("click", () => {
+        reauth = false;
         setRecovery(false);
-        setAccountMode(next);
-        document.getElementById("account-tab-" + next).focus();
+        setAccountMode(mode);
+        renderAccount();
+        accountStatus(mode === "signup" ? "Create an account and keep your guest identity and local data." :
+          account ? "Your account is ready." : "Enter your account email and password.");
+        document.getElementById(account ? "account-heading" : "account-email").focus();
       });
     }
-    document.getElementById("account-signup-passwordless").addEventListener("change", () => setAccountMode("signup"));
-    document.getElementById("btn-account-reset").addEventListener("click", () => { setRecovery(false); setAccountMode("reset"); });
-    document.getElementById("btn-account-have-code").addEventListener("click", () => {
-      setAccountMode("resetVerify");
-      accountStatus("Enter your account email and the newest reset code. A code requested on another browser/device also works here.");
-      document.getElementById("account-reset-code").focus();
+    document.getElementById("btn-account-reset").addEventListener("click", () => {
+      setRecovery(false);
+      setAccountMode("reset");
+      accountStatus("Enter your account email to receive a password reset code.");
+      document.getElementById("account-email").focus();
     });
     document.getElementById("btn-account-resend").addEventListener("click", () => {
       if (!document.getElementById("account-email").reportValidity()) return;
@@ -571,7 +565,6 @@
       globalThis.DamaPinoyApp.showScreen("screen-account");
       await logoutAccount();
     });
-    document.getElementById("btn-account-guest").addEventListener("click", logoutAccount);
     document.getElementById("btn-account-stats").addEventListener("click", () => {
       lastStats = null;
       globalThis.DamaPinoyApp.openStats();

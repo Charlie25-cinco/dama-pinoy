@@ -139,13 +139,8 @@
         <h2 id="account-heading" tabindex="-1">Player Account</h2>
         <p id="account-status" role="status" aria-live="polite">Guest play is always available. Local data stays on this device.</p>
         <div id="account-auth">
-          <div class="account-tabs" role="tablist" aria-label="Account access">
-            <button type="button" id="account-tab-login" role="tab" aria-selected="true" aria-controls="account-auth-panel">Log In</button>
-            <button type="button" id="account-tab-signup" role="tab" aria-selected="false" aria-controls="account-auth-panel" tabindex="-1">Sign Up</button>
-            <button type="button" id="account-tab-magic" role="tab" aria-selected="false" aria-controls="account-auth-panel" tabindex="-1">Magic Link</button>
-          </div>
           <form id="account-form">
-            <div id="account-auth-panel" role="tabpanel" aria-labelledby="account-tab-login" class="account-fields">
+            <div id="account-auth-panel" role="group" aria-labelledby="account-heading" class="account-fields">
               <label id="account-email-label" for="account-email">Email</label>
               <input id="account-email" class="name-input" type="email" autocomplete="email" maxlength="254" required>
               <label id="account-password-label" for="account-password">Password</label>
@@ -155,16 +150,15 @@
               <div id="account-signup-name" class="account-fields" hidden>
                 <label for="account-new-name">Display name (1–20 characters)</label>
                 <input id="account-new-name" class="name-input" maxlength="20" autocomplete="nickname">
-                <label class="account-check"><input id="account-signup-passwordless" type="checkbox"> Upgrade using an email link instead of a password</label>
               </div>
               <p id="account-auth-hint" class="online-hint">Use your existing account. Leave any current room before switching identities.</p>
               <button id="btn-account-submit" class="btn btn--primary" type="submit">Log In</button>
-              <button id="btn-account-have-code" class="btn btn--ghost" type="button" hidden>I Already Have a Reset Code</button>
               <button id="btn-account-resend" class="btn btn--ghost" type="button" hidden>Resend Reset Code</button>
             </div>
           </form>
-          <button type="button" id="btn-account-reset" class="btn btn--ghost">Reset Password with Email Code</button>
-          <button type="button" id="btn-account-guest" class="btn btn--ghost">Continue as Guest</button>
+          <button type="button" id="account-tab-signup" class="btn btn--ghost">Create Account</button>
+          <button type="button" id="btn-account-reset" class="btn btn--ghost">Forgot Password?</button>
+          <button type="button" id="account-tab-login" class="btn btn--ghost" hidden>Back to Log In</button>
         </div>
         <div id="account-profile" class="account-fields" hidden>
           <p id="account-email-display"></p>
