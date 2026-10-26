@@ -349,6 +349,7 @@
       ui.replaysStatus.textContent = "Load replays for the current identity.";
       document.getElementById("account-stats-values").replaceChildren();
       resetLeaderboardState();
+      resetTournamentState();
       render();
     }
     userId = nextId;
@@ -806,6 +807,248 @@
     });
   }
 
+  const tournaments = { data: null, id: null, editing: null, busy: false, generation: 0,
+    timer: 0, loading: false, offset: 0, returnScreen: "screen-title", confirm: null };
+  const tournamentElement = (id) => document.getElementById(id);
+  function tournamentStatus(message) {
+    const status = tournamentElement("tournaments-status");
+    if (status.textContent !== message) status.textContent = message;
+  }
+  function resetTournamentState() {
+    tournaments.generation += 1;
+    tournaments.data = null; tournaments.id = null; tournaments.editing = null;
+    tournaments.busy = false; tournaments.loading = false;
+    clearTimeout(tournaments.timer);
+    tournamentElement("tournament-form").reset();
+    tournamentElement("tournament-form").hidden = true;
+    tournamentElement("tournament-mine").replaceChildren();
+    tournamentElement("tournament-open").replaceChildren();
+    tournamentElement("tournament-bracket").replaceChildren();
+    tournamentElement("tournament-participants").replaceChildren();
+    tournamentElement("tournament-details").hidden = true;
+    tournamentElement("tournament-lists").hidden = false;
+    if (tournamentElement("tournament-confirm").open) tournamentElement("tournament-confirm").close("cancel");
+    tournamentStatus("Identity changed. Refresh tournaments for the current account.");
+  }
+  function tournamentButton(label, action, parent) {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "btn btn--ghost"; button.textContent = label;
+    button.disabled = tournaments.busy; button.addEventListener("click", action); parent.appendChild(button);
+    button.dataset.tournamentKey = (parent.id || "list") + ":" + label;
+    return button;
+  }
+  function renderTournaments() {
+    const data = tournaments.data;
+    const t = data?.tournament;
+    tournamentElement("btn-tournament-create").disabled = !account || recovery || tournaments.busy;
+    tournamentElement("btn-tournament-refresh").disabled = tournaments.busy;
+    tournamentElement("tournament-details").hidden = !t;
+    tournamentElement("tournament-lists").hidden = Boolean(t);
+    if (!t) {
+      for (const [key, id] of [["mine", "tournament-mine"], ["open", "tournament-open"]]) {
+        const list = tournamentElement(id); list.replaceChildren();
+        const entries = data?.[key] || [];
+        if (!entries.length) { const p = document.createElement("p"); p.textContent = key === "mine" ? "No tournaments joined yet." : "No open tournaments yet."; list.appendChild(p); }
+        for (const item of entries) {
+          const card = document.createElement("div"); card.className = "tournament-list-item";
+          const text = document.createElement("p");
+          text.textContent = item.name + " · " + item.status + " · " + item.bracket_size + " slots · " + FORMAT_LABELS[item.series_format];
+          card.appendChild(text);
+          tournamentButton("View " + item.name, () => loadTournaments(item.id, true), card);
+          list.appendChild(card);
+        }
+      }
+      return;
+    }
+    const participants = data.participants || [];
+    const me = participants.find((p) => p.user_id === account?.id);
+    const creator = Boolean(account && t.creator_id === account.id);
+    const name = (id) => id ? participants.find((p) => p.user_id === id)?.display_name || "Deleted player" : "Bye / no advancing player";
+    tournamentElement("tournament-detail-heading").textContent = t.name;
+    tournamentElement("tournament-summary").textContent = "Created by " + t.creator_name + " · " + t.status + " · " +
+      participants.length + "/" + t.bracket_size + " players · " + FORMAT_LABELS[t.series_format];
+    const champion = tournamentElement("tournament-champion");
+    champion.hidden = t.status !== "completed";
+    champion.textContent = t.winner_id ? (t.winner_id === account?.id ? "Congratulations! You are the champion!" : "Champion: " + name(t.winner_id)) :
+      t.winner_name ? "Champion: " + t.winner_name : "Tournament complete · No champion";
+    const controls = {
+      "btn-tournament-join": t.status === "open" && !me && Boolean(account) && !recovery && participants.length < t.bracket_size,
+      "btn-tournament-start": t.status === "open" && creator && participants.length >= 2,
+      "btn-tournament-edit": t.status === "open" && creator,
+      "btn-tournament-withdraw": Boolean(me) && !me.withdrawn && ["open", "active"].includes(t.status)
+    };
+    for (const [id, visible] of Object.entries(controls)) {
+      tournamentElement(id).hidden = !visible; tournamentElement(id).disabled = tournaments.busy;
+    }
+    tournamentElement("btn-tournament-withdraw").textContent = t.status === "active" ? "Withdraw and Forfeit" : creator ? "Cancel Tournament" : "Leave Tournament";
+    const list = tournamentElement("tournament-participants"); list.replaceChildren();
+    for (const p of participants) {
+      const li = document.createElement("li");
+      li.textContent = (p.seed ? "#" + p.seed + " " : "") + p.display_name +
+        (p.user_id === account?.id ? " (You)" : "") + (p.withdrawn ? " · Withdrawn" : p.eliminated ? " · Eliminated" : "");
+      list.appendChild(li);
+    }
+    const bracket = tournamentElement("tournament-bracket"); bracket.replaceChildren();
+    const matches = data.matches || [];
+    if (!matches.length) { const p = document.createElement("p"); p.textContent = "Pairings appear when the creator starts the tournament."; bracket.appendChild(p); }
+    const rounds = t.slots ? Math.log2(t.slots) : 0;
+    for (let round = 1; round <= rounds; round++) {
+      const column = document.createElement("section"); column.className = "tournament-round";
+      const heading = document.createElement("h5"); heading.textContent = round === rounds ? "Final" : round === rounds - 1 ? "Semifinals" : "Round " + round;
+      column.appendChild(heading);
+      const current = matches.filter((m) => m.round === round);
+      if (!current.length) { const p = document.createElement("p"); p.textContent = "Waiting for previous round."; column.appendChild(p); }
+      for (const m of current) {
+        const card = document.createElement("div"); card.className = "tournament-match";
+        card.id = "tournament-match-" + m.id;
+        const title = document.createElement("p"); title.textContent = "Match " + m.match_number + ": " +
+          (m.player1_id ? name(m.player1_id) : m.player1_name || "Bye / no advancing player") + " vs " +
+          (m.player2_id ? name(m.player2_id) : m.player2_name || "Bye / no advancing player"); card.appendChild(title);
+        const status = document.createElement("p");
+        status.textContent = m.status + (m.reason ? " · " + m.reason : "") +
+          (m.winner_id || m.winner_name ? " · Winner: " + (m.winner_id ? name(m.winner_id) : m.winner_name) : "");
+        card.appendChild(status);
+        const own = Boolean(account && [m.player1_id, m.player2_id].includes(account.id));
+        if (m.status === "pending") {
+          const seconds = Math.max(0, Math.ceil((Date.parse(m.ready_deadline) - Date.now() - tournaments.offset) / 1000));
+          const countdown = document.createElement("p"); countdown.className = "online-hint";
+          countdown.textContent = "Ready: " + (m.ready1 ? "✓" : "—") + " / " + (m.ready2 ? "✓" : "—") + " · " +
+            (seconds ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") + " remaining" : "Deadline passed; awaiting server processing.");
+          card.appendChild(countdown);
+          if (own) {
+            const ready = m.player1_id === account.id ? m.ready1 : m.ready2;
+            const button = tournamentButton(ready ? "Ready · Waiting for opponent" : "Ready", () => tournamentAction("ready", { matchId: m.id }), card);
+            button.disabled = ready || !seconds || tournaments.busy;
+          }
+        }
+        if (own && m.status === "active") tournamentButton("Enter Match", () => enterTournamentRoom(m.id), card);
+        if (own && m.status === "completed" && m.reason !== "bye") {
+          const p = document.createElement("p"); p.className = "online-hint";
+          p.textContent = m.winner_id === account.id ? "You advanced to the next round!" : "You were eliminated.";
+          card.appendChild(p);
+        }
+        if (m.game_id && own) tournamentButton("View Replay", () => tournamentReplay(m.game_id), card);
+        column.appendChild(card);
+      }
+      bracket.appendChild(column);
+    }
+  }
+  function scheduleTournamentRefresh() {
+    clearTimeout(tournaments.timer);
+    if (!tournamentElement("screen-tournaments").hidden) tournaments.timer = setTimeout(() => loadTournaments(tournaments.id), 5000);
+  }
+  async function loadTournaments(id = null, focus = false) {
+    if (tournaments.busy || (tournaments.loading && id === tournaments.id)) return;
+    if (tournaments.loading) { tournaments.generation += 1; tournaments.loading = false; }
+    tournaments.id = id;
+    const generation = tournaments.generation;
+    if (!isOnline()) { tournamentStatus("Tournaments need an internet connection. Local play still works offline."); scheduleTournamentRefresh(); return; }
+    tournaments.loading = true;
+    try {
+      const result = await request(id ? "tournament-detail" : "tournament-list", id ? { tournamentId: id } : {}, true);
+      if (generation !== tournaments.generation || id !== tournaments.id) return;
+      if (id && !result.tournament) throw new Error("Tournament unavailable.");
+      tournaments.data = result;
+      if (result.serverNow) tournaments.offset = Date.parse(result.serverNow) - Date.now();
+      const focusedKey = document.activeElement?.dataset.tournamentKey;
+      renderTournaments();
+      if (focusedKey) Array.from(tournamentElement("screen-tournaments").querySelectorAll("[data-tournament-key]"))
+        .find((button) => button.dataset.tournamentKey === focusedKey)?.focus({ preventScroll: true });
+      if (focus) tournamentElement("tournament-detail-heading").focus();
+      tournamentStatus(account && !recovery ? "Tournament state refreshed from the server." : "Log in to create, join, and play tournaments. You may browse public brackets.");
+    } catch (error) { if (generation === tournaments.generation) tournamentStatus(error.message); }
+    finally { if (generation === tournaments.generation) { tournaments.loading = false; scheduleTournamentRefresh(); } }
+  }
+  async function tournamentAction(action, details = {}) {
+    if (tournaments.busy) return;
+    if (!account || recovery) { tournamentStatus("Log in to participate in tournaments."); return; }
+    if (!isOnline()) { tournamentStatus("Tournaments need an internet connection."); return; }
+    if (action === "ready" && hasRoomIdentity()) { tournamentStatus("Leave your saved/current online room before marking Ready."); return; }
+    const generation = tournaments.generation;
+    tournaments.busy = true; renderTournaments();
+    try {
+      const result = await request("tournament-" + action, { tournamentId: tournaments.id, ...details }, true);
+      if (generation !== tournaments.generation) return;
+      tournaments.data = result; tournaments.id = result.tournament?.id || null;
+      tournamentElement("tournament-form").hidden = true;
+      const messages = { create: "Tournament created.", edit: "Tournament settings saved.", join: "You joined the tournament.",
+        start: "Tournament started. Check your bracket.", ready: "Ready recorded. Enter Match when both players are ready.", withdraw: "You left the tournament." };
+      tournamentStatus(messages[action] || "Tournament updated.");
+    } catch (error) { if (generation === tournaments.generation) tournamentStatus(error.message); }
+    finally { if (generation === tournaments.generation) { tournaments.busy = false; renderTournaments(); scheduleTournamentRefresh(); } }
+  }
+  async function enterTournamentRoom(matchId) {
+    if (tournaments.busy) return;
+    if (!isOnline()) { tournamentStatus("Tournaments need an internet connection."); return; }
+    const pairing = tournaments.data?.matches?.find((m) => m.id === matchId);
+    if (state?.room.id === pairing?.room_id && state?.room.status !== "closed") {
+      globalThis.DamaPinoyApp.showScreen("screen-online"); return;
+    }
+    if (hasRoomIdentity()) { tournamentStatus("Leave your saved/current room before entering this match. Use Online Multiplayer to rejoin an existing tournament room."); return; }
+    const generation = tournaments.generation;
+    tournaments.busy = true;
+    try {
+      const next = await request("tournament-room", { matchId });
+      if (generation !== tournaments.generation) return;
+      await applyState(next);
+      globalThis.DamaPinoyApp.showScreen("screen-online");
+    } catch (error) { if (generation === tournaments.generation) tournamentStatus(error.message); }
+    finally { if (generation === tournaments.generation) { tournaments.busy = false; renderTournaments(); } }
+  }
+  async function tournamentReplay(gameId) {
+    const generation = tournaments.generation;
+    try {
+      if (!isOnline()) throw new Error("Tournament replays require an internet connection.");
+      const result = await request("replay", { gameId }, true);
+      if (generation !== tournaments.generation) return;
+      globalThis.DamaPinoyApp.openOnlineReplay(replayFile(result.replay), false, "screen-tournaments");
+    } catch (error) { if (generation === tournaments.generation) tournamentStatus(error.message); }
+  }
+  function openTournaments(id = null) {
+    tournaments.returnScreen = !tournamentElement("screen-online").hidden ? "screen-online" :
+      !tournamentElement("screen-account").hidden ? "screen-account" : "screen-title";
+    tournamentElement("btn-tournaments-back").textContent = tournaments.returnScreen === "screen-title" ? "Back to Menu" : "Back";
+    globalThis.DamaPinoyApp.showScreen("screen-tournaments");
+    tournamentElement("tournament-form").hidden = true;
+    renderTournaments(); loadTournaments(id, Boolean(id));
+  }
+  function initTournaments() {
+    tournamentElement("btn-tournaments").addEventListener("click", () => openTournaments());
+    tournamentElement("btn-account-tournaments").addEventListener("click", () => openTournaments());
+    tournamentElement("btn-online-tournament").addEventListener("click", () => openTournaments(state?.tournamentMatch?.tournament_id));
+    tournamentElement("btn-tournaments-back").addEventListener("click", () => {
+      clearTimeout(tournaments.timer); globalThis.DamaPinoyApp.showScreen(tournaments.returnScreen);
+    });
+    tournamentElement("btn-tournament-refresh").addEventListener("click", () => loadTournaments(tournaments.id));
+    tournamentElement("btn-tournament-list").addEventListener("click", () => {
+      tournamentElement("tournaments-heading").focus(); loadTournaments();
+    });
+    for (const action of ["join", "start"]) tournamentElement("btn-tournament-" + action).addEventListener("click", () => tournamentAction(action));
+    const form = tournamentElement("tournament-form");
+    function showForm(edit) {
+      tournaments.editing = edit ? tournaments.id : null;
+      form.reset(); form.hidden = false;
+      tournamentElement("tournament-form-heading").textContent = edit ? "Edit Tournament Settings" : "Create Tournament";
+      if (edit) { const t = tournaments.data.tournament; tournamentElement("tournament-name").value = t.name;
+        tournamentElement("tournament-size").value = t.bracket_size; tournamentElement("tournament-format").value = t.series_format; }
+      tournamentElement("tournament-name").focus();
+    }
+    tournamentElement("btn-tournament-create").addEventListener("click", () => showForm(false));
+    tournamentElement("btn-tournament-edit").addEventListener("click", () => showForm(true));
+    tournamentElement("btn-tournament-form-cancel").addEventListener("click", () => { form.hidden = true; });
+    form.addEventListener("submit", (event) => { event.preventDefault(); tournamentAction(tournaments.editing ? "edit" : "create", {
+      name: tournamentElement("tournament-name").value.trim(), size: Number(tournamentElement("tournament-size").value), format: tournamentElement("tournament-format").value }); });
+    const dialog = tournamentElement("tournament-confirm");
+    tournamentElement("btn-tournament-withdraw").addEventListener("click", () => {
+      const t = tournaments.data?.tournament; if (!t) return;
+      tournaments.confirm = t.id;
+      tournamentElement("tournament-confirm-text").textContent = t.status === "active" ? "Withdraw and forfeit your unfinished match? This cannot be undone and awards no leaderboard win." :
+        t.creator_id === account?.id ? "Cancel this open tournament for everyone?" : "Leave this open tournament?";
+      dialog.showModal();
+    });
+    dialog.addEventListener("close", () => { if (dialog.returnValue === "confirm" && tournaments.confirm === tournaments.id) tournamentAction("withdraw"); tournaments.confirm = null; });
+  }
+
   function initAccount() {
     document.getElementById("btn-account").addEventListener("click", openAccount);
     document.getElementById("btn-online-account").addEventListener("click", openAccount);
@@ -904,6 +1147,7 @@
         ui.replaysStatus.textContent = "Load replays for the current identity.";
         document.getElementById("account-stats-values").replaceChildren();
         resetLeaderboardState();
+        resetTournamentState();
         globalThis.DamaPinoyApp.clearOnlineReplay();
         render();
         renderAccount();
@@ -1197,7 +1441,9 @@
     } else if (playing) {
       if (state.game.status === "finished") {
         if (room.status === "finished") {
-          setStatus(room.seriesFormat === "single"
+          setStatus(state.tournamentMatch ? (state.tournamentMatch.status === "completed" ?
+            "Tournament match complete. Return to Tournaments for your bracket." :
+            "Drawn tournament match. Both players must confirm a repeat of the same format.") : room.seriesFormat === "single"
             ? "Game complete. Request a rematch to play again."
             : "Match complete. Request a new series to play again.");
         } else {
@@ -1354,6 +1600,8 @@
     }
     const requested = room.hostId === userId ? room.rematchHost : room.rematchGuest;
     ui.rematch.hidden = isSpectator() || !finished || room.status === "closed";
+    if (state.tournamentMatch?.status === "completed") ui.rematch.hidden = true;
+    document.getElementById("btn-online-tournament").hidden = !state.tournamentMatch;
     ui.replayActions.hidden = !finished || room.status === "closed";
     ui.spectators.textContent = "Spectators (" + (state.spectators || []).length + "/5): " +
       ((state.spectators || []).map((s) => s.name + (s.account ? " (Account)" : " (Guest)")).join(", ") || "None");
@@ -1666,6 +1914,7 @@
 
   async function leaveRoom() {
     if (busy) return;
+    if (state?.tournamentMatch?.status === "active" && !globalThis.confirm("Leave and forfeit this tournament match? This withdraws you from the tournament.")) return;
     if (!state) { globalThis.DamaPinoyApp.showScreen("screen-title"); return; }
     busy = true;
     notify("player-left");
@@ -1944,6 +2193,7 @@
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state) synchronize();
     });
+    initTournaments();
     initLeaderboard();
     initAccount();
   }
@@ -1956,6 +2206,7 @@
       replayFile, loadReplays, rejoinSaved,
       openAccount, syncAccount, getAccount: () => account,
       openLeaderboard, loadLeaderboard, getLeaderboard: () => leaderboard,
+      openTournaments, loadTournaments, tournamentAction, getTournaments: () => tournaments,
     };
   }
   globalThis.DamaPinoyAccount = Object.freeze({ isLoggedIn: () => Boolean(account), renderStats: renderAccountStats });

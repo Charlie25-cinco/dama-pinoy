@@ -120,6 +120,7 @@
           <button type="button" id="btn-howto" class="btn btn--ghost">How to Play</button>
           <button type="button" id="btn-stats" class="btn btn--ghost">Statistics</button>
           <button type="button" id="btn-leaderboard" class="btn btn--ghost">Leaderboard</button>
+          <button type="button" id="btn-tournaments" class="btn btn--ghost">Tournaments</button>
           <button type="button" id="btn-online" class="btn btn--ghost">Online Multiplayer</button>
           <button type="button" id="btn-account" class="btn btn--ghost">Log In / Sign Up</button>
           <button type="button" id="btn-menu-logout" class="btn btn--ghost" hidden>Log Out</button>
@@ -171,6 +172,7 @@
           <label class="account-toggle"><input type="checkbox" id="account-leaderboard-visible"> Appear on Leaderboards</label>
           <p id="account-leaderboard-hint" class="online-hint">Off by default. When on, your display name and verified online record appear on public leaderboards. Your email is never shown. Turning it off hides your entry but keeps your record.</p>
           <button type="button" id="btn-account-leaderboard" class="btn btn--ghost">View Leaderboards</button>
+          <button type="button" id="btn-account-tournaments" class="btn btn--ghost">Tournaments</button>
           <button type="button" id="btn-account-stats" class="btn btn--ghost">Account Statistics</button>
           <button type="button" id="btn-account-replays" class="btn btn--ghost">Online Replays</button>
           <button type="button" id="btn-account-logout" class="btn btn--ghost">Log Out</button>
@@ -312,6 +314,7 @@
               <ol id="online-history" class="move-list" tabindex="0" aria-label="Online moves"></ol>
             </section>
             <button type="button" id="btn-online-rematch" class="btn btn--primary" hidden>Request Rematch</button>
+            <button type="button" id="btn-online-tournament" class="btn btn--ghost" hidden>Back to Tournament</button>
             <button type="button" id="btn-online-leave" class="btn btn--ghost">Leave Room</button>
           </aside>
         </div>
@@ -505,6 +508,52 @@
           <button type="button" id="btn-stats-back" class="btn btn--ghost">Back to Menu</button>
         </div>
         <p id="stats-local-note" class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
+      </div>
+    </section>
+
+    <section id="screen-tournaments" class="screen screen--tournaments" aria-labelledby="tournaments-heading" hidden>
+      <div class="tournament-panel">
+        <p class="eyebrow">Verified online competition</p>
+        <h2 id="tournaments-heading" tabindex="-1">Tournaments</h2>
+        <p class="online-hint">Joining publishes your display name and bracket results, even if your leaderboard entry is hidden. Email stays private.</p>
+        <p id="tournaments-status" role="status" aria-live="polite">Log in to create, join, and play. Brackets use display names, never email.</p>
+        <div class="tournament-actions">
+          <button type="button" id="btn-tournament-create" class="btn btn--primary">Create Tournament</button>
+          <button type="button" id="btn-tournament-refresh" class="btn btn--ghost">Refresh</button>
+          <button type="button" id="btn-tournaments-back" class="btn btn--ghost">Back to Menu</button>
+        </div>
+        <form id="tournament-form" class="account-fields" hidden>
+          <h3 id="tournament-form-heading">Create Tournament</h3>
+          <label for="tournament-name">Tournament name</label>
+          <input id="tournament-name" class="name-input" maxlength="60" required autocomplete="off">
+          <label for="tournament-size">Maximum players</label>
+          <select id="tournament-size" class="select"><option value="4">4 players</option><option value="8">8 players</option><option value="16">16 players</option></select>
+          <label for="tournament-format">Format for every match</label>
+          <select id="tournament-format" class="select"><option value="single">Single Game</option><option value="bestOfThree">Best of 3</option><option value="bestOfFive">Best of 5</option><option value="bestOfNine">Best of 9</option></select>
+          <p class="online-hint">Manual start only, with at least two players. You join automatically. Seeds are randomized when you start; higher seeds receive byes. Only one active tournament per player.</p>
+          <div class="tournament-actions"><button type="submit" class="btn btn--primary">Save Tournament</button><button id="btn-tournament-form-cancel" type="button" class="btn btn--ghost">Cancel</button></div>
+        </form>
+        <div id="tournament-lists">
+          <h3>My Tournaments</h3><div id="tournament-mine" class="tournament-list"></div>
+          <h3>Browse Open Tournaments</h3><div id="tournament-open" class="tournament-list"></div>
+        </div>
+        <section id="tournament-details" aria-labelledby="tournament-detail-heading" hidden>
+          <h3 id="tournament-detail-heading" tabindex="-1"></h3>
+          <p id="tournament-summary"></p><p id="tournament-champion" class="tournament-champion" hidden></p>
+          <div class="tournament-actions">
+            <button id="btn-tournament-join" type="button" class="btn btn--primary">Join Tournament</button>
+            <button id="btn-tournament-start" type="button" class="btn btn--primary">Start Tournament</button>
+            <button id="btn-tournament-edit" type="button" class="btn btn--ghost">Edit Settings</button>
+            <button id="btn-tournament-withdraw" type="button" class="btn btn--danger">Leave Tournament</button>
+            <button id="btn-tournament-list" type="button" class="btn btn--ghost">Back to List</button>
+          </div>
+          <h4>Participants</h4><ul id="tournament-participants"></ul>
+          <h4>Bracket</h4><div id="tournament-bracket" class="tournament-bracket"></div>
+          <p class="online-hint">Each pairing has a 10-minute Ready deadline. Once both players are ready, enter the match promptly: the existing 60-second disconnect grace applies. Deadlines use server time and are processed every minute. A drawn match/series repeats the same format until there is a winner. Completed games count normally; byes and forfeits never award statistics or leaderboard wins. Replays remain restricted to their original viewers.</p>
+        </section>
+        <dialog id="tournament-confirm" aria-labelledby="tournament-confirm-heading">
+          <form method="dialog" class="account-fields"><h3 id="tournament-confirm-heading">Leave tournament?</h3><p id="tournament-confirm-text"></p><div class="tournament-actions"><button class="btn btn--ghost" value="cancel">Cancel</button><button class="btn btn--danger" value="confirm">Confirm</button></div></form>
+        </dialog>
       </div>
     </section>
 

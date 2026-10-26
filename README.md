@@ -6,7 +6,7 @@ Traditional Filipino Dama checkers for local two-player, computer, or online roo
 
 This is a static, dependency-free HTML/CSS/JavaScript app. Serve the project directory using a local web server, then open `index.html` in a modern browser. For the Laragon layout used by this project (`C:\laragon\www\dama-pinoy`), open `http://localhost/dama-pinoy/` while Laragon is running. A direct `file://` opening works for the game, but service workers and offline installation require localhost or HTTPS.
 
-Local play needs no package installation, account, backend, or external assets. Online Multiplayer needs a configured Supabase project; its JavaScript client loads only when online play is opened. Service-worker installation and offline support depend on browser support.
+Local play needs no package installation, account, backend, or external assets. Online features need a configured Supabase project; its JavaScript client loads only for online/account/leaderboard/tournament features or saved-session restoration. Service-worker installation and offline support depend on browser support.
 
 ## Play
 
@@ -34,6 +34,20 @@ Select **Log In / Sign Up** for a simple email/password **Log In** form. Choose 
 Profiles are private; display names contain 1–20 trimmed characters without control characters or `< >`. New rooms use the profile name; recorded game names stay fixed. Account **Statistics** contain only server-validated online games/matches completed while the identity has an account profile. Local/AI statistics are not uploaded or merged and reappear after logout. Historical guest replays follow a same-UUID upgrade; historical guest statistics are not backfilled. Online replays and account statistics follow login across devices. A new guest identity cannot access a previous account's records.
 
 **Delete Account** requires typing `DELETE` and login within the past 15 minutes. It deletes Auth identity, profile, and private statistics, closes player rooms, removes spectator membership, and replaces identity/name references in shared room/move/result/replay records with a random tombstone and “Deleted player”. Opponents retain their shared replays; local data is unchanged. Backups and mail-delivery logs follow the platform operator's retention policy. Operator deletion of a room/game also deletes its associated online replays/statistics.
+
+### Tournaments (v2.6)
+
+Choose **Tournaments** from the menu or Account to browse open tournaments and your recent tournaments. A permanent account is needed to create, join, mark Ready, or play; authenticated guests may browse public display names/brackets. Tournament participation makes your display name public independently of the optional leaderboard toggle. Emails are never published.
+
+Create a named tournament with a maximum of 4, 8, or 16 players and Single Game or Best of 3/5/9 for every match. The creator joins automatically and may edit settings before manually starting with at least two players. Full brackets do not auto-start and scheduled starts are not included. Seeds are randomized when starting; missing slots are balanced byes to the highest seeds. A player may belong to only one active tournament. Leave other saved/current online rooms before marking Ready or entering a new tournament match.
+
+Each assigned pairing has **10 minutes** to mark **Ready**. Once both players are ready, use **Enter Match** promptly; the normal **60-second disconnect grace** applies. Matches use the existing rules, color swaps, next-game confirmations, and replay recording. A drawn match/series repeats the same format until there is a winner. Decisive winners advance once; the final winner is champion. **Back to Tournament** shows bracket progress; leave the finished room before entering the next pairing. Replay links are available to their original authorized viewers, not to everyone who can browse the bracket.
+
+One player ready at the deadline advances by forfeit; neither ready means both are eliminated, leaving a bye downstream. **Withdraw and Forfeit**, including leaving an unfinished tournament room, is irreversible. Deleting an account withdraws it and replaces its public name with **Deleted player**, preserving opponents' replays. An open creator exit cancels the tournament; an active creator exit does not stop it. If nobody advances through the final, it completes with **No champion**. Byes and forfeits change only the bracket: no fabricated game, replay, statistics, or leaderboard win. Real completed games/series feed the existing account statistics and six leaderboards normally, respecting leaderboard opt-in.
+
+**Deployment:** apply `supabase/migrations/20261029_tournaments.sql` after the leaderboard migration, then redeploy `online-room` with JWT verification enabled. The migration enables Supabase Cron (`pg_cron`) and schedules `dama-tournament-deadlines` every minute. Check its job/run history after deployment; the scheduler must run even without an open app. Deadline displays use server time; processing can lag the deadline by about one minute plus job execution time. Do not silently replace Cron with browser timers. Only database/server roles may run advancement functions; clients have read-only bracket access. Creation is limited to five per hour and successful joins to twenty per minute per account.
+
+Supabase Free with its bundled Cron is the first option; Supabase Pro adds capacity for growth, not different tournament rules. Review the project's region/retention settings: public names/brackets and private game records remain on the configured Supabase project, with no automatic tournament retention cleanup. Tournaments require internet and never change local/AI records. The service worker caches only app assets, not tournament API responses.
 
 ### Leaderboards (v2.5)
 

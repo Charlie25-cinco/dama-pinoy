@@ -3950,9 +3950,9 @@
       replayState = null;
       if (isReplayScreenOpen()) showScreen("screen-account");
     },
-    openOnlineReplay(file, download = false) {
+    openOnlineReplay(file, download = false, returnScreen = "screen-online") {
       const imported = deserializeReplay(file);
-      openReplayData(imported.data, "screen-online", imported.exportedAt, imported.view);
+      openReplayData(imported.data, returnScreen === "screen-tournaments" ? returnScreen : "screen-online", imported.exportedAt, imported.view);
       if (download) return exportReplay();
       return true;
     },

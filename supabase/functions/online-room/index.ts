@@ -1,4 +1,4 @@
-// Dama Pinoy v2.3. Deploy with JWT verification enabled. Never bundle this
+// Dama Pinoy v2.6. Deploy with JWT verification enabled. Never bundle this
 // function or its service-role environment variable into the frontend.
 import "../../../online-rules.js";
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
@@ -86,7 +86,10 @@ async function snapshot(db, roomId, userId, attempt = 0) {
     if (attempt >= 2) throw new Error("Room unavailable or state changed. Please retry.");
     return snapshot(db, roomId, userId, attempt + 1);
   }
+  const pairing = await db.from("tournament_matches").select("id,tournament_id,status").eq("room_id", roomId).maybeSingle();
+  if (pairing.error) throw new Error("Room unavailable.");
   return {
+    tournamentMatch: pairing.data || null,
     role: isPlayer ? "player" : "spectator",
     spectators: (spectators.data || []).map((s) => ({ id: s.guest_id, name: s.guest_name,
       account: accounts.has(s.guest_id) })),
@@ -160,6 +163,66 @@ Deno.serve(async (request) => {
       return reply({ error: "Account profile unavailable. Please sign in again." }, 403);
     }
     let id;
+
+    if (typeof body.action === "string" && body.action.startsWith("tournament-")) {
+      const readOnly = ["tournament-list", "tournament-detail"].includes(body.action);
+      if (!readOnly && !accountUser) return reply({ error: "Log in to participate in tournaments." }, 403);
+      let tid = body.tournamentId ? requireRoomId(body.tournamentId) : null;
+      const invoke = async (name, args) => {
+        const result = await db.rpc(name, args);
+        if (result.error) {
+          const message = result.error.message || "";
+          throw new Error(message.startsWith("Tournament:") ? message :
+            "Tournament: Action unavailable or state changed. Refresh and try again.");
+        }
+        return result.data;
+      };
+      const options = () => {
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 60 || /[\u0000-\u001f\u007f<>]/.test(name) ||
+            ![4, 8, 16].includes(body.size)) throw new Error("Tournament: Enter a valid name and bracket size.");
+        const { format } = roomOptions({ format: body.format });
+        return { p_name: name, p_size: body.size, p_format: format };
+      };
+      switch (body.action) {
+        case "tournament-list":
+          return reply(await invoke("tournament_view", { p_user: userId }));
+        case "tournament-detail":
+          if (!tid) throw new Error("Tournament: Tournament unavailable.");
+          break;
+        case "tournament-create":
+          tid = await invoke("tournament_create", { p_user: userId, ...options() });
+          break;
+        case "tournament-edit":
+          await invoke("tournament_edit", { p_user: userId, p_tournament: tid, ...options() });
+          break;
+        case "tournament-join":
+        case "tournament-start":
+        case "tournament-withdraw":
+          await invoke(body.action.replace("-", "_"), { p_user: userId, p_tournament: tid });
+          break;
+        case "tournament-ready":
+        case "tournament-room": {
+          const matchId = requireRoomId(body.matchId);
+          const match = await db.from("tournament_matches").select("*").eq("id", matchId).single();
+          if (match.error || !match.data ||
+              ![match.data.player1_id, match.data.player2_id].includes(userId)) {
+            return reply({ error: "This is not your assigned tournament match." }, 403);
+          }
+          tid = match.data.tournament_id;
+          if (body.action === "tournament-ready") {
+            await invoke("tournament_ready", { p_user: userId, p_match: matchId, p_board: rules.initialBoard() });
+          } else {
+            if (match.data.status !== "active" || !match.data.room_id) throw new Error("Tournament: Match is not active.");
+            await rpc(db, "online_heartbeat", { p_room: match.data.room_id, p_user: userId });
+            return reply({ state: await snapshot(db, match.data.room_id, userId) });
+          }
+          break;
+        }
+        default: return reply({ error: "Invalid tournament action." }, 400);
+      }
+      return reply(await invoke("tournament_view", { p_user: userId, p_tournament: tid }));
+    }
 
     switch (body.action) {
       case "account": {
@@ -272,6 +335,11 @@ Deno.serve(async (request) => {
       }
       case "rematch": {
         id = requireRoomId(body.roomId);
+        const pairing = await db.from("tournament_matches").select("status").eq("room_id", id).maybeSingle();
+        if (pairing.error) throw new Error("Room unavailable.");
+        if (pairing.data && pairing.data.status !== "active") {
+          return reply({ error: "Tournament match complete. Return to Tournaments for the next pairing." }, 409);
+        }
         await rpc(db, "online_heartbeat", { p_room: id, p_user: userId });
         await rpc(db, "online_request_rematch", {
           p_room: id, p_user: userId, p_board: rules.initialBoard(),
@@ -293,7 +361,7 @@ Deno.serve(async (request) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Online request failed.";
-    const safe = /^(Enter |Invalid |Room unavailable|Room unavailable or state changed|Could not create)/.test(message)
+    const safe = /^(Tournament:|Enter |Invalid |Room unavailable|Room unavailable or state changed|Could not create)/.test(message)
       ? message : "Online request failed. Try again.";
     return reply({ error: safe }, 400);
   }

@@ -2,6 +2,13 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.6.0 — 2026-10-26
+
+- **Added:** Account-based single-elimination tournaments with 4/8/16-player capacity, manual start, randomized seeds, balanced byes, public brackets, Ready controls, and champion/no-champion results.
+- **Added:** Server-authorized pairing rooms, verified match advancement, same-format retries for drawn matches, original replay access, and existing leaderboard/statistics integration without double counting.
+- **Added:** Server-side creation/join limits, a 10-minute Ready deadline processed by Supabase Cron, disconnect/withdrawal forfeits, and deletion-safe tournament history. Byes and forfeits never create game results or leaderboard wins.
+- **Changed:** Refreshed the PWA cache; preserved independent offline local play and existing account/online features.
+
 ## 2.5.0 — 2026-10-26
 
 - **Added:** Opt-in public **Leaderboards** with six boards — Overall Wins, Win Rate (minimum 10 completed online games), Best of 3/5/9 series wins, and Current Win Streak (longest streak is shown alongside). Each row shows rank, display name, the board metric, games, win rate, and last active. Guests may view boards; only permanent accounts can appear on them.
