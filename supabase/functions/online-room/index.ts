@@ -1,4 +1,4 @@
-// Dama Pinoy v2.6. Deploy with JWT verification enabled. Never bundle this
+// Dama Pinoy v2.7. Deploy with JWT verification enabled. Never bundle this
 // function or its service-role environment variable into the frontend.
 import "../../../online-rules.js";
 import { createClient } from "npm:@supabase/supabase-js@2.57.0";
@@ -99,6 +99,7 @@ async function snapshot(db, roomId, userId, attempt = 0) {
       hostName: room.host_name, guestName: room.guest_name,
       hostAccount: accounts.has(room.host_user_id), guestAccount: accounts.has(room.guest_user_id),
       hostColor: room.host_color, guestColor: room.guest_color,
+      friendsPrivate: room.friends_private === true,
       turn: room.current_turn, version: room.version,
       seriesFormat: room.series_format,
       seriesNumber: room.current_series_number,
@@ -158,11 +159,51 @@ Deno.serve(async (request) => {
     const db = createClient(url, serviceKey, { auth: { persistSession: false } });
     const userId = user.id;
     const accountUser = user.is_anonymous !== true;
-    const profile = accountUser ? await db.from("profiles").select("display_name").eq("id", userId).single() : null;
+    const profile = accountUser ? await db.from("profiles").select("display_name,player_tag").eq("id", userId).single() : null;
     if (accountUser && (profile.error || !profile.data)) {
       return reply({ error: "Account profile unavailable. Please sign in again." }, 403);
     }
     let id;
+
+    if (typeof body.action === "string" && body.action.startsWith("social-")) {
+      if (!accountUser) return reply({ error: "Friends: Log in with a permanent account." }, 403);
+      const invoke = async (name, parameters) => {
+        const result = await db.rpc(name, parameters);
+        if (result.error) throw new Error(result.error.message?.startsWith("Friends:") ? result.error.message :
+          "Friends: Action unavailable or state changed. Refresh and try again.");
+        return result.data;
+      };
+      switch (body.action) {
+        case "social-state": break;
+        case "social-search":
+          return reply({ results: await invoke("social_search", { p_user: userId, p_query: body.query }) });
+        case "social-profile":
+          return reply({ profile: await invoke("social_profile", { p_user: userId, p_other: requireRoomId(body.otherId) }) });
+        case "social-presence":
+          if (typeof body.online !== "boolean") throw new Error("Friends: Invalid presence state.");
+          await invoke("social_presence", { p_user: userId, p_session: requireRoomId(body.sessionId), p_online: body.online });
+          return reply({ updated: true });
+        case "social-action":
+          if (!["request", "accept", "decline", "cancel", "remove", "block", "unblock"].includes(body.operation)) throw new Error("Friends: Invalid action.");
+          await invoke("social_action", { p_user: userId, p_other: requireRoomId(body.otherId), p_action: body.operation });
+          break;
+        case "social-invite": {
+          const options = roomOptions(body);
+          const result = await invoke("social_invite", { p_user: userId, p_other: requireRoomId(body.otherId),
+            p_room: body.roomId ? requireRoomId(body.roomId) : null, p_code: roomCode(), p_color: options.color, p_format: options.format });
+          return reply({ social: await invoke("social_state", { p_user: userId }), state: await snapshot(db, result.roomId, userId) });
+        }
+        case "social-invite-reply": {
+          if (typeof body.join !== "boolean") throw new Error("Friends: Invalid invite response.");
+          const roomId = await invoke("social_invite_reply", { p_user: userId, p_invite: requireRoomId(body.inviteId),
+            p_join: body.join, p_board: rules.initialBoard() });
+          return reply({ social: await invoke("social_state", { p_user: userId }),
+            ...(roomId ? { state: await snapshot(db, roomId, userId) } : {}) });
+        }
+        default: return reply({ error: "Friends: Invalid action." }, 400);
+      }
+      return reply({ social: await invoke("social_state", { p_user: userId }) });
+    }
 
     if (typeof body.action === "string" && body.action.startsWith("tournament-")) {
       const readOnly = ["tournament-list", "tournament-detail"].includes(body.action);
@@ -227,7 +268,7 @@ Deno.serve(async (request) => {
     switch (body.action) {
       case "account": {
         if (!accountUser) return reply({ account: null });
-        return reply({ account: { id: userId, displayName: profile.data.display_name, email: user.email } });
+        return reply({ account: { id: userId, displayName: profile.data.display_name, playerTag: profile.data.player_tag, email: user.email } });
       }
       case "account-stats": {
         if (!accountUser) return reply({ error: "Log in to view account statistics." }, 403);
@@ -361,7 +402,7 @@ Deno.serve(async (request) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Online request failed.";
-    const safe = /^(Tournament:|Enter |Invalid |Room unavailable|Room unavailable or state changed|Could not create)/.test(message)
+    const safe = /^(Friends:|Tournament:|Enter |Invalid |Room unavailable|Room unavailable or state changed|Could not create)/.test(message)
       ? message : "Online request failed. Try again.";
     return reply({ error: safe }, 400);
   }

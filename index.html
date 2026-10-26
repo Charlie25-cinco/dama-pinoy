@@ -29,6 +29,12 @@
 
   <main class="app" id="main" tabindex="-1">
 
+    <aside id="friends-notice" class="friends-notice" aria-label="Friends notification" hidden>
+      <p id="friends-notice-text" role="status" aria-live="polite"></p>
+      <button id="btn-friends-notice-open" type="button" class="btn btn--ghost">Open Friends</button>
+      <button id="btn-friends-notice-close" type="button" class="link-button">Dismiss</button>
+    </aside>
+
     <section id="screen-title" class="screen screen--title" aria-labelledby="title-heading">
       <div class="title-card">
         <div class="emblem" aria-hidden="true">
@@ -173,6 +179,8 @@
           <p id="account-leaderboard-hint" class="online-hint">Off by default. When on, your display name and verified online record appear on public leaderboards. Your email is never shown. Turning it off hides your entry but keeps your record.</p>
           <button type="button" id="btn-account-leaderboard" class="btn btn--ghost">View Leaderboards</button>
           <button type="button" id="btn-account-tournaments" class="btn btn--ghost">Tournaments</button>
+          <button type="button" id="btn-friends" class="btn btn--ghost">Friends</button>
+          <p id="account-player-tag" class="online-hint"></p>
           <button type="button" id="btn-account-stats" class="btn btn--ghost">Account Statistics</button>
           <button type="button" id="btn-account-replays" class="btn btn--ghost">Online Replays</button>
           <button type="button" id="btn-account-logout" class="btn btn--ghost">Log Out</button>
@@ -264,6 +272,7 @@
             </section>
           </div>
           <button type="button" id="btn-online-back" class="btn btn--ghost">Back to Menu</button>
+          <button type="button" id="btn-online-friends" class="btn btn--ghost">Friends / Invites</button>
         </div>
 
         <section id="online-replays" class="online-replays" aria-labelledby="online-replays-heading">
@@ -280,6 +289,12 @@
           <p id="online-waiting-players" class="online-players">Waiting for opponent…</p>
           <p id="online-waiting-options" class="online-waiting-options"></p>
           <p class="online-hint">Keep this page open. The game starts when a second player joins.</p>
+          <section id="friends-waiting" aria-labelledby="friends-waiting-heading" hidden>
+            <h3 id="friends-waiting-heading">Invite an online friend</h3>
+            <p class="online-hint">Inviting reserves the guest seat for that friend only. Private invite rooms do not allow spectators.</p>
+            <div id="friends-waiting-list" class="friends-list"></div>
+            <button id="btn-waiting-friends" type="button" class="btn btn--ghost">Friends / Invites</button>
+          </section>
           <button type="button" id="btn-online-wait-leave" class="btn btn--ghost">Leave Room</button>
         </div>
 
@@ -508,6 +523,45 @@
           <button type="button" id="btn-stats-back" class="btn btn--ghost">Back to Menu</button>
         </div>
         <p id="stats-local-note" class="stats-note">Local two-player results are recorded from Player 1's perspective. Drawn matches count as series played, not as series wins or losses. Reset Statistics keeps player names, preferences, the saved replay, the active game, and all-time win counters.</p>
+      </div>
+    </section>
+
+    <section id="screen-friends" class="screen screen--friends" aria-labelledby="friends-heading" hidden>
+      <div class="friends-panel">
+        <p class="eyebrow">Your Dama circle</p>
+        <h2 id="friends-heading" tabindex="-1">Friends</h2>
+        <p id="friends-self" class="friends-self"></p>
+        <p class="online-hint">Accepted friends can see your online status and verified online statistics, even if your leaderboard entry is hidden. Email and local/AI records stay private. No last-seen or room details are shared.</p>
+        <p id="friends-status" role="status" aria-live="polite">Log in to use Friends. Internet required.</p>
+        <div class="friends-actions">
+          <button id="btn-friends-refresh" type="button" class="btn btn--ghost">Refresh</button>
+          <button id="btn-friends-back" type="button" class="btn btn--ghost">Back</button>
+        </div>
+        <form id="friends-search-form" class="friends-search">
+          <label for="friends-search">Find a player</label>
+          <input id="friends-search" class="name-input" maxlength="80" autocomplete="off" required placeholder="Exact display name or player tag">
+          <button type="submit" class="btn btn--primary">Search</button>
+        </form>
+        <div id="friends-search-results" class="friends-list" aria-label="Search results"></div>
+        <h3>Room invites</h3><div id="friends-invites" class="friends-list"></div>
+        <div class="friends-columns">
+          <section aria-labelledby="friends-incoming-heading"><h3 id="friends-incoming-heading">Incoming requests</h3><div id="friends-incoming" class="friends-list"></div></section>
+          <section aria-labelledby="friends-outgoing-heading"><h3 id="friends-outgoing-heading">Outgoing requests</h3><div id="friends-outgoing" class="friends-list"></div></section>
+        </div>
+        <h3>Your friends</h3><div id="friends-list" class="friends-list"></div>
+        <section id="friend-profile" aria-labelledby="friend-profile-heading" hidden>
+          <h3 id="friend-profile-heading" tabindex="-1"></h3>
+          <p class="online-hint">Verified online results only. This does not grant replay access.</p>
+          <dl id="friend-profile-stats" class="account-stats-values"></dl>
+          <button id="btn-friend-profile-close" type="button" class="btn btn--ghost">Close Profile</button>
+        </section>
+        <details><summary>Blocked players</summary><div id="friends-blocks" class="friends-list"></div></details>
+        <p class="online-hint">Tags are permanent. Searches return up to 10 exact matches. Requests: 10/hour; searches: 30/minute; invites: 5/minute. Declined requests have a 24-hour cooldown in both directions. Invites expire after 5 minutes; expired private rooms never become public. Abrupt disconnects may take about a minute to appear offline.</p>
+        <dialog id="friends-confirm" aria-labelledby="friends-confirm-heading">
+          <form method="dialog"><h3 id="friends-confirm-heading">Confirm friend action</h3><p id="friends-confirm-text"></p>
+            <div class="friends-actions"><button value="cancel" class="btn btn--ghost">Cancel</button><button value="confirm" class="btn btn--danger">Confirm</button></div>
+          </form>
+        </dialog>
       </div>
     </section>
 

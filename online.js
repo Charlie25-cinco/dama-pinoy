@@ -216,6 +216,9 @@
     ui.name.readOnly = signedIn;
     if (signedIn && !recovery && !reauth) syncLeaderboardToggle();
     else if (!signedIn) setLeaderboardCheckbox(false);
+    renderFriends();
+    if (signedIn && !recovery) startFriends();
+    else if (friends.owner) stopFriends();
   }
   function setAccountMode(mode) {
     accountMode = mode;
@@ -350,6 +353,7 @@
       document.getElementById("account-stats-values").replaceChildren();
       resetLeaderboardState();
       resetTournamentState();
+      await stopFriends();
       render();
     }
     userId = nextId;
@@ -474,6 +478,7 @@
     return accountAction(async () => {
       requireIdentitySwitchAllowed();
       const service = await loadClient();
+      await stopFriends();
       const result = await service.auth.signOut({ scope: "local" });
       if (result.error) throw new Error("Logout failed. Check your connection and retry.");
       clearStored("damaPinoy.accountExpected");
@@ -805,6 +810,283 @@
       leaderboard.cache.delete(leaderboard.board);
       if (!document.getElementById("screen-leaderboard").hidden) loadLeaderboard();
     });
+  }
+
+  const friends = { owner: null, channel: null, connected: false, starting: false, generation: 0,
+    timer: 0, hintTimer: 0, sessionId: null, knownSession: null, data: null, results: [], profile: null,
+    loading: false, busy: false, readRun: 0, searchRun: 0, profileRun: 0, returnScreen: "screen-account", confirm: null };
+  const friendEl = (id) => document.getElementById(id);
+  function friendStatus(text) { if (friendEl("friends-status").textContent !== text) friendEl("friends-status").textContent = text; }
+  function friendNotice(text) {
+    friendEl("friends-notice-text").textContent = text; friendEl("friends-notice").hidden = false;
+  }
+  function clearFriendProfile() {
+    friends.profileRun += 1; friends.profile = null;
+    friendEl("friend-profile").hidden = true;
+    friendEl("friend-profile-heading").textContent = "";
+    friendEl("friend-profile-stats").replaceChildren();
+  }
+  async function stopFriends(publish = true) {
+    const previous = friends.channel, owner = friends.owner, sessionId = friends.sessionId, known = friends.knownSession;
+    friends.generation += 1; friends.owner = null; friends.channel = null; friends.connected = false; friends.starting = false;
+    friends.knownSession = null; friends.sessionId = null;
+    clearInterval(friends.timer); clearTimeout(friends.hintTimer); friends.timer = 0;
+    friends.data = null; friends.results = []; friends.busy = false; friends.loading = false;
+    friends.readRun += 1;
+    friends.searchRun += 1; friends.confirm = null; clearFriendProfile();
+    friendEl("friends-search").value = ""; friendEl("friends-notice").hidden = true;
+    if (friendEl("friends-confirm").open) friendEl("friends-confirm").close("cancel");
+    renderFriends();
+    const work = [];
+    if (previous && client) work.push(client.removeChannel(previous));
+    if (publish && owner && sessionId && known && isOnline()) work.push(request("social-presence", { sessionId, online: false }, true, known));
+    await Promise.allSettled(work);
+  }
+  function validSocial(data) {
+    return data?.self?.id === account?.id && ["friends", "requests", "blocks", "invites"].every((key) => Array.isArray(data[key]));
+  }
+  function applyFriends(data, announce = false) {
+    if (!validSocial(data)) throw new Error("Friends: Service unavailable. Refresh and try again.");
+    const before = friends.data;
+    if (announce && before) {
+      const incoming = data.invites.find((i) => i.incoming && !before.invites.some((old) => old.id === i.id));
+      if (incoming) friendNotice("Invite received from " + incoming.name + ".");
+      else if (data.requests.some((r) => r.incoming && r.status === "pending" && !before.requests.some((old) => old.id === r.id))) friendNotice("Friend request received.");
+      else if (data.friends.some((f) => !before.friends.some((old) => old.id === f.id))) friendNotice("Friend request accepted.");
+      else if (before.friends.some((f) => !data.friends.some((now) => now.id === f.id))) friendNotice("Friend removed.");
+      else if (data.requests.some((r) => !r.incoming && r.status === "declined" && !before.requests.some((old) => old.id === r.id && old.status === "declined"))) friendNotice("Friend request declined.");
+    }
+    friends.data = data;
+    if (friends.profile && !data.friends.some((f) => f.id === friends.profile.id)) clearFriendProfile();
+    renderFriends();
+  }
+  async function loadFriends(announce = false, quiet = false) {
+    if (!account || recovery || friends.loading || friends.busy) return;
+    if (!isOnline()) { friendStatus("Friends need an internet connection. Local play still works offline."); return; }
+    const id = account.id, generation = friends.generation, run = ++friends.readRun;
+    friends.loading = true;
+    try {
+      const result = await request("social-state", {}, true);
+      if (generation !== friends.generation || run !== friends.readRun || account?.id !== id || recovery) return;
+      applyFriends(result.social, announce);
+      if (!quiet) friendStatus("Friends refreshed. Online status is shared only with accepted friends.");
+    } catch (error) { if (generation === friends.generation && run === friends.readRun) friendStatus(error.message); }
+    finally { if (generation === friends.generation && run === friends.readRun) friends.loading = false; }
+  }
+  async function publishFriendPresence(online) {
+    if (!account || recovery || !friends.owner || !isOnline()) return;
+    const id = account.id, generation = friends.generation;
+    const session = (await client.auth.getSession()).data.session;
+    if (session?.user.id !== id || id !== friends.owner || generation !== friends.generation) return;
+    friends.knownSession = session;
+    await request("social-presence", { sessionId: friends.sessionId, online }, true, session);
+  }
+  function queueFriendsRefresh() {
+    clearTimeout(friends.hintTimer);
+    friends.readRun += 1; friends.loading = false; friends.searchRun += 1; friends.profileRun += 1;
+    friends.results = [];
+    const generation = friends.generation;
+    friends.hintTimer = setTimeout(() => { if (generation === friends.generation) loadFriends(true); }, 250);
+  }
+  async function startFriends() {
+    if (!account || recovery || !isOnline() || friends.starting || friends.owner === account.id) return;
+    const id = account.id, generation = friends.generation;
+    friends.starting = true;
+    try {
+      const service = await loadClient();
+      // Old/offline clients without Realtime still retain all local features.
+      if (typeof service.channel !== "function" || generation !== friends.generation || account?.id !== id || recovery) return;
+      const session = (await service.auth.getSession()).data.session;
+      if (session?.user.id !== id || generation !== friends.generation || account?.id !== id || recovery) return;
+      friends.owner = id; friends.knownSession = session; friends.sessionId = crypto.randomUUID();
+      const subscription = service.channel("social:" + id, { config: { private: true,
+        broadcast: { self: false }, presence: { key: friends.sessionId } } });
+      friends.channel = subscription;
+      subscription.on("broadcast", { event: "social-changed" }, () => { if (generation === friends.generation) queueFriendsRefresh(); });
+      subscription.on("presence", { event: "sync" }, () => { if (generation === friends.generation) queueFriendsRefresh(); });
+      subscription.subscribe(async (status) => {
+        if (generation !== friends.generation || account?.id !== id || recovery) return;
+        friends.connected = status === "SUBSCRIBED";
+        renderFriends();
+        try {
+          if (friends.connected) { await subscription.track({ sessionId: friends.sessionId }); await publishFriendPresence(true); await loadFriends(); }
+          else { await publishFriendPresence(false); friendStatus("Friends connection interrupted. Reconnecting…"); }
+        } catch (error) { if (generation === friends.generation) friendStatus("Friends connection unavailable. Refresh when online."); }
+      });
+      friends.timer = setInterval(async () => {
+        if (generation !== friends.generation || !friends.connected) return;
+        try { await publishFriendPresence(true); await loadFriends(true); } catch (error) { if (generation === friends.generation) friendStatus("Friends connection unavailable. Retrying…"); }
+      }, 15000);
+    } catch (error) { if (generation === friends.generation) friendStatus("Friends connection unavailable. Refresh when online."); }
+    finally { if (generation === friends.generation) friends.starting = false; }
+  }
+  function friendButton(parent, text, handler, key) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "btn btn--ghost";
+    button.textContent = text; button.dataset.friendKey = key; button.disabled = friends.busy;
+    button.addEventListener("click", handler); parent.appendChild(button); return button;
+  }
+  function friendCard(parent, person, status = "") {
+    const card = document.createElement("article"); card.className = "friend-card";
+    const title = document.createElement("p"); title.className = "friend-card__name";
+    title.textContent = person.name + (person.tag ? "#" + person.tag : ""); card.appendChild(title);
+    if (status) { const note = document.createElement("p"); note.className = "online-hint"; note.textContent = status; card.appendChild(note); }
+    const actions = document.createElement("div"); actions.className = "friends-actions"; card.appendChild(actions);
+    parent.appendChild(card); return actions;
+  }
+  function renderFriends() {
+    const data = friends.data, activeKey = document.activeElement?.dataset.friendKey;
+    const signedIn = Boolean(account && !recovery);
+    const count = data ? data.requests.filter((r) => r.incoming && r.status === "pending").length + data.invites.filter((i) => i.incoming).length : 0;
+    friendEl("btn-friends").textContent = "Friends" + (count ? " (" + count + ")" : "");
+    friendEl("friends-self").textContent = signedIn ? account.displayName + (data?.self?.tag || account.playerTag ? "#" + (data?.self?.tag || account.playerTag) : "") : "Log in to use Friends.";
+    friendEl("account-player-tag").textContent = signedIn && (data?.self?.tag || account.playerTag) ? "Player tag: " + (data?.self?.tag || account.playerTag) + " · Permanent" : "";
+    friendEl("friends-search").disabled = !signedIn || friends.busy;
+    friendEl("friends-search-form").querySelector("button").disabled = !signedIn || friends.busy;
+    friendEl("btn-friends-refresh").disabled = !signedIn || friends.busy;
+    const groups = ["friends-search-results", "friends-incoming", "friends-outgoing", "friends-list", "friends-blocks", "friends-invites", "friends-waiting-list"];
+    for (const id of groups) friendEl(id).replaceChildren();
+    const confirm = (operation, person) => {
+      friends.confirm = { operation, otherId: person.id, generation: friends.generation };
+      friendEl("friends-confirm-text").textContent = operation === "block" ? "Block " + person.name + "? This removes your friendship and pending invites, hides social visibility, and stops new requests. Existing games and public history remain unchanged." :
+        operation === "remove" ? "Remove " + person.name + " from your friends? Pending invites will be revoked." : "Unblock " + person.name + "? This will not restore the friendship automatically.";
+      friendEl("friends-confirm").showModal();
+    };
+    for (const person of friends.results) {
+      const actions = friendCard(friendEl("friends-search-results"), person, person.relationship || "Not friends");
+      if (!["accepted", "pending"].includes(person.relationship)) friendButton(actions, "Add Friend", () => friendAction("request", person.id), person.id + ":request");
+      friendButton(actions, "Block", () => confirm("block", person), person.id + ":block-search");
+    }
+    for (const r of data?.requests || []) {
+      const actions = friendCard(friendEl(r.incoming ? "friends-incoming" : "friends-outgoing"), r, r.status);
+      if (r.status !== "pending") continue;
+      if (r.incoming) {
+        friendButton(actions, "Accept", () => friendAction("accept", r.userId), r.id + ":accept");
+        friendButton(actions, "Decline", () => friendAction("decline", r.userId), r.id + ":decline");
+      } else friendButton(actions, "Cancel Request", () => friendAction("cancel", r.userId), r.id + ":cancel");
+      friendButton(actions, "Block", () => confirm("block", { ...r, id: r.userId }), r.id + ":block");
+    }
+    for (const person of data?.friends || []) {
+      const status = !friends.connected || !isOnline() ? "Status unavailable" : person.online ? "Online" : "Offline";
+      const actions = friendCard(friendEl("friends-list"), person, status);
+      friendButton(actions, "View Profile", () => showFriendProfile(person.id), person.id + ":profile");
+      const invite = friendButton(actions, "Invite to Room", () => inviteFriend(person.id), person.id + ":invite");
+      invite.disabled = friends.busy || !friends.connected || !person.online;
+      friendButton(actions, "Remove Friend", () => confirm("remove", person), person.id + ":remove");
+      friendButton(actions, "Block", () => confirm("block", person), person.id + ":block");
+      if (person.online && friends.connected) {
+        const waitingActions = friendCard(friendEl("friends-waiting-list"), person, "Online");
+        friendButton(waitingActions, "Invite", () => inviteFriend(person.id), person.id + ":waiting-invite");
+      }
+    }
+    for (const person of data?.blocks || []) {
+      const actions = friendCard(friendEl("friends-blocks"), person, "Blocked");
+      friendButton(actions, "Unblock", () => confirm("unblock", person), person.id + ":unblock");
+    }
+    for (const invite of data?.invites || []) {
+      const actions = friendCard(friendEl("friends-invites"), invite, (invite.incoming ? "Invite received" : "Invite sent") + " · expires " + new Date(invite.expiresAt).toLocaleTimeString());
+      if (invite.incoming) friendButton(actions, "Join Room", () => replyFriendInvite(invite.id, true), invite.id + ":join");
+      friendButton(actions, invite.incoming ? "Decline Invite" : "Cancel Invite", () => replyFriendInvite(invite.id, false), invite.id + ":dismiss");
+    }
+    for (const id of groups.slice(1)) if (!friendEl(id).children.length) {
+      const p = document.createElement("p"); p.className = "online-hint"; p.textContent = data ? "None yet." : "Log in and refresh to load Friends."; friendEl(id).appendChild(p);
+    }
+    friendEl("friends-waiting").hidden = !signedIn || state?.room.status !== "waiting" || state?.room.hostId !== userId;
+    if (activeKey) Array.from(document.querySelectorAll("[data-friend-key]")).find((button) => button.dataset.friendKey === activeKey)?.focus({ preventScroll: true });
+  }
+  async function friendAction(operation, otherId) {
+    if (friends.busy || !account || recovery) return;
+    if (!isOnline()) { friendStatus("Friends need an internet connection."); return; }
+    const generation = friends.generation; friends.busy = true;
+    friends.readRun += 1; friends.loading = false; friends.searchRun += 1; friends.profileRun += 1;
+    renderFriends();
+    try {
+      const result = await request("social-action", { operation, otherId }, true);
+      if (generation !== friends.generation) return;
+      friends.results = []; applyFriends(result.social);
+      friendStatus({ request: "Friend request sent.", accept: "Friend request accepted.", decline: "Friend request declined.",
+        cancel: "Friend request cancelled.", remove: "Friend removed.", block: "Player blocked.", unblock: "Player unblocked." }[operation]);
+    } catch (error) { if (generation === friends.generation) friendStatus(error.message); }
+    finally { if (generation === friends.generation) { friends.busy = false; renderFriends(); loadFriends(false, true); } }
+  }
+  async function searchFriends(query) {
+    if (!account || recovery || friends.busy) return;
+    if (!isOnline()) { friendStatus("Friends need an internet connection."); return; }
+    const generation = friends.generation, run = ++friends.searchRun;
+    friendStatus("Searching exact names and player tags…");
+    try {
+      const result = await request("social-search", { query }, true);
+      if (generation !== friends.generation || run !== friends.searchRun) return;
+      friends.results = Array.isArray(result.results) ? result.results : []; renderFriends();
+      friendStatus(friends.results.length ? "Showing up to 10 exact matches." : "No matching players found.");
+    } catch (error) { if (generation === friends.generation && run === friends.searchRun) friendStatus(error.message); }
+  }
+  async function showFriendProfile(otherId) {
+    if (!account || recovery || !isOnline()) { friendStatus("Friend profiles need an internet connection."); return; }
+    const generation = friends.generation, run = ++friends.profileRun;
+    try {
+      const result = await request("social-profile", { otherId }, true);
+      if (generation !== friends.generation || run !== friends.profileRun || !friends.data?.friends.some((f) => f.id === otherId)) return;
+      const p = result.profile; friends.profile = p;
+      friendEl("friend-profile-heading").textContent = p.name + "#" + p.tag;
+      const stats = p.stats, values = [["Games", stats.games.played], ["Wins", stats.games.wins], ["Losses", stats.games.losses],
+        ["Draws", stats.games.draws], ["Win rate", stats.games.played ? (100 * stats.games.wins / stats.games.played).toFixed(1) + "%" : "0.0%"],
+        ["Series played", stats.series.played], ["Series won", stats.series.wins], ["Series lost", stats.series.losses], ["Series drawn", stats.series.draws]];
+      const dl = friendEl("friend-profile-stats"); dl.replaceChildren();
+      for (const [name, value] of values) { const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = name; dd.textContent = String(value); dl.append(dt, dd); }
+      friendEl("friend-profile").hidden = false; friendEl("friend-profile-heading").focus();
+    } catch (error) { if (generation === friends.generation && run === friends.profileRun) { clearFriendProfile(); friendStatus(error.message); } }
+  }
+  async function inviteFriend(otherId) {
+    if (friends.busy || !account || recovery) return;
+    const waiting = state?.room.status === "waiting" && state.room.hostId === userId;
+    if (hasRoomIdentity() && !waiting) { friendStatus("Leave your saved/current room before creating a private friend room."); friendNotice("Leave your saved/current room first."); return; }
+    await socialRoomAction("social-invite", { otherId, roomId: waiting ? state.room.id : null,
+      color: document.querySelector('input[name="online-color"]:checked')?.value || "R",
+      format: document.querySelector('input[name="online-format"]:checked')?.value || "single" }, "Invite sent.");
+  }
+  async function replyFriendInvite(inviteId, join) {
+    if (join && hasRoomIdentity()) { friendStatus("Leave your saved/current room before joining an invite."); return; }
+    await socialRoomAction("social-invite-reply", { inviteId, join }, join ? "Joined private friend room." : "Invite dismissed.");
+  }
+  async function socialRoomAction(action, details, message) {
+    if (friends.busy || !account || recovery) return;
+    if (!isOnline()) { friendStatus("Friends need an internet connection."); return; }
+    const generation = friends.generation; friends.busy = true;
+    friends.readRun += 1; friends.loading = false;
+    renderFriends();
+    try {
+      const result = await request(action, details, true);
+      if (generation !== friends.generation) return;
+      applyFriends(result.social);
+      if (result.state) { await applyState(result.state); if (generation !== friends.generation) return; globalThis.DamaPinoyApp.showScreen("screen-online"); }
+      friendStatus(message); friendNotice(message);
+    } catch (error) { if (generation === friends.generation) { friendStatus(error.message); friendNotice(error.message); } }
+    finally { if (generation === friends.generation) { friends.busy = false; renderFriends(); loadFriends(false, true); } }
+  }
+  function openFriends() {
+    if (!friendEl("screen-game").hidden) {
+      friendNotice("Finish or leave your local game before opening Friends. Your game has not been changed.");
+      return;
+    }
+    const current = document.querySelector(".screen:not([hidden])")?.id;
+    if (current && current !== "screen-friends") friends.returnScreen = current;
+    globalThis.DamaPinoyApp.showScreen("screen-friends"); friendEl("friends-notice").hidden = true;
+    renderFriends();
+    if (!account || recovery) { friendStatus("Log in with a permanent account to use Friends."); return; }
+    if (!isOnline()) { friendStatus("Friends need an internet connection. Local play still works offline."); return; }
+    startFriends(); loadFriends();
+  }
+  function initFriends() {
+    for (const id of ["btn-friends", "btn-online-friends", "btn-waiting-friends", "btn-friends-notice-open"]) friendEl(id).addEventListener("click", openFriends);
+    friendEl("btn-friends-back").addEventListener("click", () => globalThis.DamaPinoyApp.showScreen(friends.returnScreen));
+    friendEl("btn-friends-notice-close").addEventListener("click", () => { friendEl("friends-notice").hidden = true; });
+    friendEl("btn-friends-refresh").addEventListener("click", () => { startFriends(); loadFriends(); });
+    friendEl("btn-friend-profile-close").addEventListener("click", clearFriendProfile);
+    friendEl("friends-search-form").addEventListener("submit", (event) => { event.preventDefault(); searchFriends(friendEl("friends-search").value.trim()); });
+    friendEl("friends-confirm").addEventListener("close", () => { const pending = friends.confirm; friends.confirm = null;
+      if (friendEl("friends-confirm").returnValue === "confirm" && pending?.generation === friends.generation) friendAction(pending.operation, pending.otherId); });
+    window.addEventListener("offline", () => { stopFriends(false); friendStatus("Friends need an internet connection. Local play still works offline."); });
+    window.addEventListener("online", () => { if (account && !recovery) { startFriends(); loadFriends(); } });
   }
 
   const tournaments = { data: null, id: null, editing: null, busy: false, generation: 0,
@@ -1148,6 +1430,7 @@
         document.getElementById("account-stats-values").replaceChildren();
         resetLeaderboardState();
         resetTournamentState();
+        await stopFriends(false);
         globalThis.DamaPinoyApp.clearOnlineReplay();
         render();
         renderAccount();
@@ -1322,6 +1605,10 @@
     if (!response.ok || (!raw && !result?.state && !result?.left)) {
       if (response.status === 401 && (!knownSession || knownSession.user.id === userId)) {
         accountStatus("Session expired. Please log in again. Local play is still available.");
+        if (typeof action === "string" && action.startsWith("social-")) {
+          await stopFriends(false);
+          friendStatus("Friends session expired. Open Account to log in again; local play still works.");
+        }
       }
       throw new Error(typeof result?.error === "string" ? result.error :
         "Online service is unavailable. Try again.");
@@ -1437,7 +1724,7 @@
     if (room?.status === "closed") {
       setStatus("Room closed because your opponent left or disconnected. You can create or join another room.");
     } else if (waiting) {
-      setStatus("Waiting for opponent…");
+      setStatus(room.friendsPrivate ? "Private friend room. Only the invited friend may join with a valid invite; no spectators." : "Waiting for opponent…");
     } else if (playing) {
       if (state.game.status === "finished") {
         if (room.status === "finished") {
@@ -1626,6 +1913,7 @@
     }
     ui.history.appendChild(fragment);
     renderBoard();
+    renderFriends();
   }
 
   async function applyState(next, force = false) {
@@ -2193,6 +2481,7 @@
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state) synchronize();
     });
+    initFriends();
     initTournaments();
     initLeaderboard();
     initAccount();
@@ -2207,6 +2496,7 @@
       openAccount, syncAccount, getAccount: () => account,
       openLeaderboard, loadLeaderboard, getLeaderboard: () => leaderboard,
       openTournaments, loadTournaments, tournamentAction, getTournaments: () => tournaments,
+      openFriends, loadFriends, searchFriends, friendAction, inviteFriend, replyFriendInvite, stopFriends, getFriends: () => friends,
     };
   }
   globalThis.DamaPinoyAccount = Object.freeze({ isLoggedIn: () => Boolean(account), renderStats: renderAccountStats });

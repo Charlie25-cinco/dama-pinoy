@@ -2,6 +2,15 @@
 
 This project uses [Semantic Versioning](https://semver.org/). This file begins with v1.4.0; earlier releases predate this changelog.
 
+## 2.7.0 — 2026-10-26
+
+- **Added:** Permanent 8-character player tags, exact-name/tag search, private friend requests, accept/decline/cancel/remove actions, block/unblock, and accepted-friend-only verified online profiles/statistics.
+- **Added:** Private Realtime inboxes with server-verified multi-session presence, social notifications, and Friends tools in Account and Online Multiplayer. Raw events are hints only; email, local records, last-seen, and room details are never shared with friends.
+- **Added:** Expiring, recipient-validated room invites and reserved private guest seats. Non-invitees cannot join or spectate; expired or revoked invites never make a room public. Blocking/removal revokes pending invites but does not interrupt existing games or erase shared history.
+- **Added:** Server-side limits of 10 requests/hour, 30 searches/minute, and 5 invites/minute, plus a pair-wide 24-hour decline cooldown that survives cancelled/deleted request rows.
+- **Changed:** Refreshed the installed app cache while preserving offline local play, tournament seats, replay ownership, and leaderboard opt-in.
+- **Fixed:** Delayed social reads and expired sessions cannot restore cleared private buffers; Friends notifications do not abandon active local games and Back preserves the originating screen.
+
 ## 2.6.0 — 2026-10-26
 
 - **Added:** Account-based single-elimination tournaments with 4/8/16-player capacity, manual start, randomized seeds, balanced byes, public brackets, Ready controls, and champion/no-champion results.

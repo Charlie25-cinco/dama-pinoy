@@ -490,6 +490,32 @@ body {
 #account-stats[hidden], #account-password[hidden], #account-password-label[hidden],
 #btn-menu-logout[hidden] { display: none; }
 
+/* ---------- Friends: private social tools, using the existing game surfaces ---------- */
+.friends-panel { width: min(100%, 900px); margin: var(--space-4) auto; padding: clamp(18px, 4vw, 32px);
+  background: var(--card-image); border: 2px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
+.friends-panel h2 { font-family: var(--font-display); color: var(--heading); }
+.friends-panel h3, .friends-self { color: var(--heading); }
+.friends-self { font-weight: 700; font-variant-numeric: tabular-nums; }
+.friends-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+.friends-actions .btn { min-height: 44px; flex: 1 1 140px; white-space: normal; }
+.friends-list { display: grid; gap: var(--space-2); min-width: 0; margin-bottom: var(--space-3); }
+.friends-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.friend-card, #friend-profile { min-width: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.friend-card__name { font-weight: 700; color: var(--heading); margin: 0 0 var(--space-2); }
+.friend-card .online-hint { margin: var(--space-2) 0; }
+.friends-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; margin: var(--space-3) 0; }
+.friends-search label { grid-column: 1 / -1; font-weight: 700; }
+.friends-search input { grid-column: auto; grid-row: auto; width: 100%; min-width: 0; min-height: 48px; padding: var(--space-3);
+  font: inherit; border: 2px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); }
+.friends-notice { position: fixed; right: 16px; bottom: 16px; z-index: 100; width: min(360px, calc(100vw - 32px)); padding: var(--space-3);
+  background: var(--surface); border: 2px solid var(--accent); border-radius: var(--radius-md); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
+.friends-notice p { margin: 0 0 var(--space-2); }
+.friends-notice .btn { min-height: 44px; margin-right: var(--space-2); }
+#friends-confirm { width: min(92vw, 540px); padding: var(--space-4); border: 2px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+#friends-confirm::backdrop { background: rgb(0 0 0 / 65%); }
+#friends-notice[hidden], #friend-profile[hidden], #friends-waiting[hidden] { display: none; }
+@media (max-width: 640px) { .friends-columns, .friends-search { grid-template-columns: minmax(0, 1fr); } }
+
 /* ---------- Tournament lobby and bracket: wood-first competition cards ---------- */
 .tournament-panel {
   width: min(100%, 1080px); margin: var(--space-4) auto;
